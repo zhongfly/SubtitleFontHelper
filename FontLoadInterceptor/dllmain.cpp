@@ -14,6 +14,7 @@
 DWORD WINAPI DelayedAttach(LPVOID lpThreadParameter);
 
 DWORD attachThreadId = 0;
+bool detourAttached = false;
 
 HMODULE LoadDll(const char* name)
 {
@@ -73,13 +74,14 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 			{
 				if (!sfh::AttachDetour())
 					return FALSE;
+				detourAttached = true;
 				sfh::EventLog::GetInstance().LogDllAttach(GetCurrentProcessId());
 			}
 			break;
 		case DLL_THREAD_DETACH:
 			break;
 		case DLL_PROCESS_DETACH:
-			if (sfh::IsDetourNeeded())
+			if (lpReserved == nullptr && detourAttached && sfh::IsDetourNeeded())
 			{
 				sfh::DetachDetour();
 			}

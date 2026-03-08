@@ -148,7 +148,8 @@ namespace
 			Document = 0,
 			RootElement,
 			IndexFileElement,
-			MonitorElement
+			MonitorElement,
+			UnknownElement
 		};
 
 		std::unique_ptr<sfh::ConfigFile> m_config;
@@ -241,14 +242,15 @@ namespace
 				}
 				else
 				{
-					return E_FAIL;
+					// Unknown element, ignore it
+					m_status.emplace_back(ElementType::UnknownElement);
 				}
 				break;
 			case ElementType::IndexFileElement:
-				return E_FAIL;
-				break;
 			case ElementType::MonitorElement:
-				return E_FAIL;
+			case ElementType::UnknownElement:
+				// Nested elements in known elements or unknown elements - ignore them
+				m_status.emplace_back(ElementType::UnknownElement);
 				break;
 			default:
 				return E_FAIL;
@@ -293,6 +295,10 @@ namespace
 				{
 					return E_FAIL;
 				}
+				break;
+			case ElementType::UnknownElement:
+				// Just pop the unknown element
+				m_status.pop_back();
 				break;
 			default:
 				return E_FAIL;

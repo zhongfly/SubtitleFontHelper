@@ -5,6 +5,7 @@
 #include "RpcServer.h"
 #include "EventLog.h"
 
+#include <set>
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 
@@ -314,10 +315,24 @@ public:
 		QueryTrie<FontDatabase::FontFaceElement, true> win32FamilyName;
 		QueryTrie<FontDatabase::FontFaceElement, false> fullName;
 		QueryTrie<FontDatabase::FontFaceElement, false> postScriptName;
+
+		// Track which fonts (path+index) have been added to ensure priority
+		// Fonts from earlier databases have higher priority
+		std::set<std::pair<std::wstring, uint32_t>> addedFonts;
+
 		for (auto& db : dbs)
 		{
 			for (auto& font : db->m_fonts)
 			{
+				// Check if this font has already been added from a higher priority database
+				auto fontId = std::make_pair(font.m_path, font.m_index);
+				if (addedFonts.find(fontId) != addedFonts.end())
+				{
+					// Skip this font - already added from higher priority database
+					continue;
+				}
+				addedFonts.insert(fontId);
+
 				for (auto& name : font.m_names)
 				{
 					if (name.m_type == name.Win32FamilyName)

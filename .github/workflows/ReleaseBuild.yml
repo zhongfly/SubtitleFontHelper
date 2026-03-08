@@ -19,12 +19,12 @@ jobs:
     runs-on: windows-2022
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.2
+      uses: microsoft/setup-msbuild@v2
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       id: cache
       with:
         path: vcpkg_binary_cache\
@@ -60,7 +60,8 @@ jobs:
         .\copyFiles.ps1
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ReleaseBuild
-        path: ReleaseBuild\
+        path: ReleaseBuild/
+        if-no-files-found: error

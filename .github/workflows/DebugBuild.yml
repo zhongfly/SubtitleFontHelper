@@ -1,8 +1,6 @@
 name: DebugBuild
 
 on:
-  push:
-    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
 
@@ -18,12 +16,12 @@ jobs:
     runs-on: windows-2022
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.2
+      uses: microsoft/setup-msbuild@v2
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       id: cache
       with:
         path: vcpkg_binary_cache\
@@ -58,16 +56,24 @@ jobs:
       run: |
         .\copyFiles.ps1
 
+    - name: Run functional tests
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      shell: pwsh
+      run: |
+        .\test-functionality.ps1 -Configuration ${{env.BUILD_CONFIGURATION}}
+
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: ReleaseBuild
-        path: ReleaseBuild\
+        name: DebugBuild
+        path: ReleaseBuild/
+        if-no-files-found: error
 
     - name: Upload build tree
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: BuildTree
         path: |
-          Build\x64
-          Build\Win32
+          Build/x64
+          Build/Win32
+        if-no-files-found: error

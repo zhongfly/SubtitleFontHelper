@@ -23,7 +23,7 @@ BOOL WINAPI ControlHandler(DWORD dwCtrlType)
 	return TRUE;
 }
 
-void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std::wstring& output, bool& deduplicate)
+void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std::wstring& output, bool& deduplicate, bool& deleteduplicates)
 {
 	for (int i = 1; i < argc; ++i)
 	{
@@ -44,6 +44,11 @@ void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std
 			else if (_wcsicmp(argv[i], L"-dedup") == 0)
 			{
 				deduplicate = true;
+			}
+			else if (_wcsicmp(argv[i], L"-deleteduplicates") == 0)
+			{
+				deduplicate = true;
+				deleteduplicates = true;
 			}
 			else if (_wcsicmp(argv[i], L"-worker") == 0)
 			{
@@ -80,9 +85,10 @@ void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std
 void PrintHelp()
 {
 	std::wcout << SetOutputDefault
-		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-dedup] [-worker WorkerCount] Directory... \n"
+		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-dedup] [-deleteduplicates] [-worker WorkerCount] Directory... \n"
 		<< "\t-output OutputFile: path to the output\n"
 		<< "\t-dedup: enable deduplication of files\n"
+		<< "\t-deleteduplicates: enable deduplication and delete duplicate files\n"
 		<< "\t-worker WorkerCount: set work thread count, default is half of your processor count\n"
 		<< "\tDirectory: directories need to build index" << std::endl;
 }
@@ -115,10 +121,11 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 		// validate arguments
 		std::vector<std::wstring> input;
 		std::wstring output;
-		bool deduplicate;
+		bool deduplicate = false;
+		bool deleteduplicates = false;
 		try
 		{
-			FindOptions(argc, argv, input, output, deduplicate);
+			FindOptions(argc, argv, input, output, deduplicate, deleteduplicates);
 		}
 		catch (std::exception& e)
 		{
@@ -203,7 +210,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			const size_t total = fileSet.size();
 			std::thread thr([&]()
 			{
-				fileSet = Deduplicate(fileSet, fileSize, progress);
+				fileSet = Deduplicate(fileSet, fileSize, progress, deleteduplicates);
 			});
 			while (!g_cancelToken)
 			{

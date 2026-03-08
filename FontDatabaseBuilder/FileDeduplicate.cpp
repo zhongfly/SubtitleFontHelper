@@ -147,7 +147,7 @@ namespace
 }
 
 std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, const std::vector<uint64_t>& inputSize,
-                                      std::atomic<size_t>& progress)
+                                      std::atomic<size_t>& progress, bool deleteDuplicates)
 {
 	std::vector<std::wstring> ret;
 	std::unordered_map<uint64_t, RecordStorage> lookupTable;
@@ -240,6 +240,8 @@ std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, co
 	if (g_cancelToken)
 		return {};
 
+	std::mutex deleteLock;
+
 	for (auto& group : lookupTable)
 	{
 		auto& storage = group.second;
@@ -248,23 +250,86 @@ std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, co
 		if (storage.vec)
 		{
 			std::sort(storage.vec->begin(), storage.vec->end());
-			auto last = std::unique(storage.vec->begin(), storage.vec->end());
-			for (auto it = storage.vec->begin(); it != last; ++it)
+			auto it = storage.vec->begin();
+			while (it != storage.vec->end())
 			{
 				if (!it->path)
+				{
+					++it;
 					continue;
+				}
+				// First occurrence - keep it
 				ret.emplace_back(*it->path);
+				++it;
+
+				// Delete duplicates if requested
+				if (deleteDuplicates)
+				{
+					while (it != storage.vec->end() && it[-1] == it[0])
+					{
+						if (it->path)
+						{
+							// Try to delete the duplicate file
+							if (!DeleteFileW(it->path->c_str()))
+							{
+								std::lock_guard lg(deleteLock);
+								EraseLineStruct::EraseLine();
+								std::wcout << SetOutputRed << L"Failed to delete duplicate file: " << *it->path << L'\n';
+								std::wcout << L"Error code: " << GetLastError() << std::endl << SetOutputDefault;
+							}
+						}
+						++it;
+					}
+				}
+				else
+				{
+					// Skip duplicates without deleting
+					while (it != storage.vec->end() && it[-1] == it[0])
+						++it;
+				}
 			}
 		}
 		else
 		{
 			std::sort(storage.records, storage.records + storage.nextIndex);
-			auto last = std::unique(storage.records, storage.records + storage.nextIndex);
-			for (auto it = storage.records; it != last; ++it)
+			auto it = storage.records;
+			auto end = storage.records + storage.nextIndex;
+			while (it != end)
 			{
 				if (!it->path)
+				{
+					++it;
 					continue;
+				}
+				// First occurrence - keep it
 				ret.emplace_back(*it->path);
+				++it;
+
+				// Delete duplicates if requested
+				if (deleteDuplicates)
+				{
+					while (it != end && it[-1] == it[0])
+					{
+						if (it->path)
+						{
+							// Try to delete the duplicate file
+							if (!DeleteFileW(it->path->c_str()))
+							{
+								std::lock_guard lg(deleteLock);
+								EraseLineStruct::EraseLine();
+								std::wcout << SetOutputRed << L"Failed to delete duplicate file: " << *it->path << L'\n';
+								std::wcout << L"Error code: " << GetLastError() << std::endl << SetOutputDefault;
+							}
+						}
+						++it;
+					}
+				}
+				else
+				{
+					// Skip duplicates without deleting
+					while (it != end && it[-1] == it[0])
+						++it;
+				}
 			}
 		}
 	}

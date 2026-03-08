@@ -7,6 +7,7 @@
 
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
+#include <unordered_map>
 
 namespace
 {
@@ -276,6 +277,7 @@ private:
 	QueryTrie<FontDatabase::FontFaceElement, false> m_fullName;
 	QueryTrie<FontDatabase::FontFaceElement, false> m_postScriptName;
 	QueryTrie<FontDatabase::FontFaceElement, true> m_win32FamilyName;
+	std::unordered_map<const FontDatabase::FontFaceElement*, size_t> m_fontPriority;
 	std::vector<std::unique_ptr<FontDatabase>> m_dbs;
 
 	IDaemon* m_daemon;
@@ -314,10 +316,13 @@ public:
 		QueryTrie<FontDatabase::FontFaceElement, true> win32FamilyName;
 		QueryTrie<FontDatabase::FontFaceElement, false> fullName;
 		QueryTrie<FontDatabase::FontFaceElement, false> postScriptName;
-		for (auto& db : dbs)
+		std::unordered_map<const FontDatabase::FontFaceElement*, size_t> fontPriority;
+		for (size_t priority = 0; priority < dbs.size(); ++priority)
 		{
+			auto& db = dbs[priority];
 			for (auto& font : db->m_fonts)
 			{
+				fontPriority.emplace(&font, priority);
 				for (auto& name : font.m_names)
 				{
 					if (name.m_type == name.Win32FamilyName)
@@ -350,7 +355,53 @@ public:
 		m_win32FamilyName = std::move(win32FamilyName);
 		m_fullName = std::move(fullName);
 		m_postScriptName = std::move(postScriptName);
+		m_fontPriority = std::move(fontPriority);
 		UpdateVerison();
+	}
+
+	size_t GetPriority(const FontDatabase::FontFaceElement* face) const
+	{
+		auto result = m_fontPriority.find(face);
+		THROW_HR_IF(E_UNEXPECTED, result == m_fontPriority.end());
+		return result->second;
+	}
+
+	void RetainPriority(std::vector<FontDatabase::FontFaceElement*>& faces, size_t priority) const
+	{
+		std::erase_if(faces, [&](FontDatabase::FontFaceElement* face)
+		{
+			return GetPriority(face) != priority;
+		});
+	}
+
+	void RetainHighestPriority(std::vector<FontDatabase::FontFaceElement*>& faces) const
+	{
+		if (faces.empty())
+			return;
+		auto priority = GetPriority(faces.front());
+		for (auto face : faces)
+		{
+			priority = (std::min)(priority, GetPriority(face));
+		}
+		RetainPriority(faces, priority);
+	}
+
+	std::optional<size_t> GetHighestPriority(const std::vector<FontDatabase::FontFaceElement*>& first,
+	                                         const std::vector<FontDatabase::FontFaceElement*>& second) const
+	{
+		std::optional<size_t> ret;
+		auto update = [&](const std::vector<FontDatabase::FontFaceElement*>& faces)
+		{
+			for (auto face : faces)
+			{
+				auto priority = GetPriority(face);
+				if (!ret.has_value() || priority < *ret)
+					ret = priority;
+			}
+		};
+		update(first);
+		update(second);
+		return ret;
 	}
 
 	static void AppendFontFace(FontQueryResponse& response, const std::vector<FontDatabase::FontFaceElement*>& faces,
@@ -399,6 +450,7 @@ public:
 		ret.set_version(1);
 
 		auto family = m_win32FamilyName.QueryEntry(queryString.c_str(), doTruncated);
+		RetainHighestPriority(family);
 		if (!family.empty())
 		{
 			// if it's a valid family name, return the list
@@ -415,6 +467,12 @@ public:
 		{
 			return element->m_psOutline == 1;
 		});
+		auto highestPriority = GetHighestPriority(postscript, fullname);
+		if (highestPriority.has_value())
+		{
+			RetainPriority(postscript, *highestPriority);
+			RetainPriority(fullname, *highestPriority);
+		}
 		AppendFontFace(ret, postscript, dedup);
 		AppendFontFace(ret, fullname, dedup);
 		return ret;

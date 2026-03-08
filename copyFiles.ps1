@@ -10,9 +10,6 @@ Set-Location $scriptdir
 New-Item ReleaseBuild -ItemType Directory
 Set-Location ReleaseBuild
 
-Copy-Item ../event.man .
-Copy-Item ../registerETW.ps1 .
-Copy-Item ../unregisterETW.ps1 .
 Copy-Item ../enableAutoStart.ps1 .
 Copy-Item ../disableAutoStart.ps1 .
 Copy-Item ../SubtitleFontHelper.example.xml .

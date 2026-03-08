@@ -15,19 +15,13 @@
 
 ### SubtitleFontAutoLoaderDaemon.exe
 主程序。运行后会从exe所在目录下的SubtitleFontHelper.xml读取配置文件。程序没有界面，但是会创建一个托盘图标，以方便控制。
-日志将会写入Windows事件查看器（应用程序和服务日志 - SubtitleFontHelper）。为了能正确地记录及显示日志，需要执行`registerETW.ps1`以注册事件清单。执行`unregisterETW.ps1`以反注册事件清单。注意，不注册事件清单不会导致功能出现问题，但是无法记录或浏览日志。注册事件清单后，如果要搬移程序位置或更新程序，请先反注册事件清单后再操作，否则可能提示文件被占用。
+日志将会写入程序目录下的`SubtitleFontHelper.log`，并按大小自动轮转为`SubtitleFontHelper.log.1`到`SubtitleFontHelper.log.5`。达到约10MiB后会滚动到下一个归档文件，因此无需注册ETW或事件查看器清单。
 
 ### enableAutoStart.ps1
 在当前用户的开始菜单-启动目录下创建快捷方式，以实现自动启动。
 
 ### disableAutoStart.ps1
 删除上面创建的快捷方式，以禁用自动启动。
-
-### registerETW.ps1
-注册事件清单。
-
-### unregisterETW.ps1
-反注册事件清单。
 
 ### SubtitleFontHelper.xml
 配置文件，使用UTF-8编码。样例如下所示：

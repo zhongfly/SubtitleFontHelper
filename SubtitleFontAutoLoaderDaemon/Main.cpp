@@ -20,8 +20,6 @@
 #include <shellapi.h>
 #include <wil/win32_helpers.h>
 
-#include "event.h"
-
 namespace sfh
 {
 	bool g_debugOutputEnabled = false;

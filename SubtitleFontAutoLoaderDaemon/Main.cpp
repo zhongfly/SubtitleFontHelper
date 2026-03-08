@@ -4,6 +4,7 @@
 #include "IDaemon.h"
 #include "TrayIcon.h"
 #include "PersistantData.h"
+#include "ConfigWatcher.h"
 #include "QueryService.h"
 #include "RpcServer.h"
 #include "ProcessMonitor.h"
@@ -48,6 +49,29 @@ namespace sfh
 	class Daemon : public IDaemon
 	{
 	private:
+		static constexpr size_t FILE_READ_RETRY_COUNT = 3;
+		static constexpr auto FILE_READ_RETRY_INTERVAL = std::chrono::milliseconds(200);
+
+		template <typename TFunc>
+		static auto ReadWithRetry(TFunc&& reader)
+		{
+			std::exception_ptr lastException;
+			for (size_t attempt = 0; attempt < FILE_READ_RETRY_COUNT; ++attempt)
+			{
+				try
+				{
+					return reader();
+				}
+				catch (...)
+				{
+					lastException = std::current_exception();
+					if (attempt + 1 != FILE_READ_RETRY_COUNT)
+						std::this_thread::sleep_for(FILE_READ_RETRY_INTERVAL);
+				}
+			}
+			std::rethrow_exception(lastException);
+		}
+
 		enum class MessageType
 		{
 			Init = 0,
@@ -76,6 +100,7 @@ namespace sfh
 			std::unique_ptr<RpcServer> m_rpcServer;
 			std::unique_ptr<ProcessMonitor> m_processMonitor;
 			std::unique_ptr<Prefetch> m_prefetch;
+			std::unique_ptr<ConfigWatcher> m_configWatcher;
 		};
 
 		std::unique_ptr<Service> m_service;
@@ -147,35 +172,47 @@ namespace sfh
 				while (!m_msgQueue.empty())
 					m_msgQueue.pop();
 			}
-			m_service = std::make_unique<Service>();
+			auto newService = std::make_unique<Service>();
 			std::filesystem::path selfPath{wil::GetModuleFileNameW<wil::unique_hlocal_string>().get()};
 			selfPath.remove_filename();
 			auto configPath = selfPath / L"SubtitleFontHelper.xml";
 			auto lruCachePath = selfPath / L"lruCache.txt";
-			auto cfg = ConfigFile::ReadFromFile(configPath);
+			auto cfg = ReadWithRetry([&]()
+			{
+				return ConfigFile::ReadFromFile(configPath);
+			});
 
-			m_service->m_systemTray = std::make_unique<SystemTray>(this);
+			newService->m_systemTray = std::make_unique<SystemTray>(this);
 			std::vector<std::unique_ptr<FontDatabase>> dbs;
+			std::vector<std::filesystem::path> watchFiles;
+			watchFiles.emplace_back(configPath);
 			for (auto& indexFile : cfg->m_indexFile)
 			{
-				dbs.emplace_back(FontDatabase::ReadFromFile(indexFile.m_path));
+				auto indexPath = std::filesystem::absolute(indexFile.m_path).lexically_normal();
+				watchFiles.emplace_back(indexPath);
+				dbs.emplace_back(ReadWithRetry([&]()
+				{
+					return FontDatabase::ReadFromFile(indexPath);
+				}));
 			}
-			m_service->m_prefetch = std::make_unique<Prefetch>(this, cfg->lruSize, lruCachePath);
-			m_service->m_queryService = std::make_unique<QueryService>(this);
-			m_service->m_rpcServer = std::make_unique<RpcServer>(
+			newService->m_prefetch = std::make_unique<Prefetch>(this, cfg->lruSize, lruCachePath);
+			newService->m_queryService = std::make_unique<QueryService>(this);
+			newService->m_rpcServer = std::make_unique<RpcServer>(
 				this,
-				m_service->m_queryService->GetRpcRequestHandler(),
-				m_service->m_prefetch->GetRpcFeedbackHandler());
-			m_service->m_queryService->Load(std::move(dbs));
-			m_service->m_processMonitor = std::make_unique<ProcessMonitor>(
+				newService->m_queryService->GetRpcRequestHandler(),
+				newService->m_prefetch->GetRpcFeedbackHandler());
+			newService->m_queryService->Load(std::move(dbs));
+			newService->m_processMonitor = std::make_unique<ProcessMonitor>(
 				this, std::chrono::milliseconds(cfg->wmiPollInterval));
 			std::vector<std::wstring> monitorProcess;
 			for (auto& process : cfg->m_monitorProcess)
 			{
 				monitorProcess.emplace_back(process.m_name);
 			}
-			m_service->m_processMonitor->SetMonitorList(std::move(monitorProcess));
-			m_service->m_systemTray->NotifyFinishLoad();
+			newService->m_processMonitor->SetMonitorList(std::move(monitorProcess));
+			newService->m_configWatcher = std::make_unique<ConfigWatcher>(this, std::move(watchFiles));
+			newService->m_systemTray->NotifyFinishLoad();
+			m_service = std::move(newService);
 		}
 
 		void OnException(std::exception_ptr exception)

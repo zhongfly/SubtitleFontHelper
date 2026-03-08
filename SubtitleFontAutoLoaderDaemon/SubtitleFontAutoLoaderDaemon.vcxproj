@@ -203,6 +203,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Common.cpp" />
+    <ClCompile Include="ConfigWatcher.cpp" />
     <ClCompile Include="FontQuery.pb.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="pch.cpp" />
@@ -239,6 +240,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common.h" />
+    <ClInclude Include="ConfigWatcher.h" />
     <ClInclude Include="IDaemon.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Prefetch.h" />

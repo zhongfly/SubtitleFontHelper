@@ -8,6 +8,7 @@
 #include "RpcServer.h"
 #include "ProcessMonitor.h"
 #include "Prefetch.h"
+#include "FileWatcher.h"
 
 #include <queue>
 #include <variant>
@@ -76,6 +77,7 @@ namespace sfh
 			std::unique_ptr<RpcServer> m_rpcServer;
 			std::unique_ptr<ProcessMonitor> m_processMonitor;
 			std::unique_ptr<Prefetch> m_prefetch;
+			std::unique_ptr<FileWatcher> m_fileWatcher;
 		};
 
 		std::unique_ptr<Service> m_service;
@@ -175,6 +177,17 @@ namespace sfh
 				monitorProcess.emplace_back(process.m_name);
 			}
 			m_service->m_processMonitor->SetMonitorList(std::move(monitorProcess));
+
+			// Set up file watcher to monitor config and index files
+			m_service->m_fileWatcher = std::make_unique<FileWatcher>(this);
+			std::vector<std::wstring> filesToWatch;
+			filesToWatch.push_back(configPath.wstring());
+			for (auto& indexFile : cfg->m_indexFile)
+			{
+				filesToWatch.push_back(indexFile.m_path);
+			}
+			m_service->m_fileWatcher->SetMonitorFiles(std::move(filesToWatch), 500);
+
 			m_service->m_systemTray->NotifyFinishLoad();
 		}
 

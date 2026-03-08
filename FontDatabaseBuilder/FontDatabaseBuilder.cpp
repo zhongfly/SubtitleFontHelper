@@ -4,6 +4,8 @@
 #include "FontAnalyzer.h"
 #include "FileDeduplicate.h"
 
+#include <shellapi.h>
+#pragma comment(lib, "Shell32.lib")
 #include <fcntl.h>
 #include <io.h>
 
@@ -17,13 +19,21 @@ DWORD g_WorkerCount = g_ProcessorCount / 2;
 
 std::atomic<bool> g_cancelToken{false};
 
+struct ProgramOptions
+{
+	std::vector<std::wstring> input;
+	std::wstring output;
+	bool deduplicate = false;
+	bool deleteDuplicates = false;
+};
+
 BOOL WINAPI ControlHandler(DWORD dwCtrlType)
 {
 	g_cancelToken = true;
 	return TRUE;
 }
 
-void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std::wstring& output, bool& deduplicate)
+void FindOptions(int argc, wchar_t** argv, ProgramOptions& options)
 {
 	for (int i = 1; i < argc; ++i)
 	{
@@ -33,7 +43,7 @@ void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std
 			{
 				if (i + 1 < argc)
 				{
-					output = argv[i + 1];
+					options.output = argv[i + 1];
 					++i;
 				}
 				else
@@ -43,7 +53,12 @@ void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std
 			}
 			else if (_wcsicmp(argv[i], L"-dedup") == 0)
 			{
-				deduplicate = true;
+				options.deduplicate = true;
+			}
+			else if (_wcsicmp(argv[i], L"-delete-duplicates") == 0)
+			{
+				options.deduplicate = true;
+				options.deleteDuplicates = true;
 			}
 			else if (_wcsicmp(argv[i], L"-worker") == 0)
 			{
@@ -68,21 +83,37 @@ void FindOptions(int argc, wchar_t** argv, std::vector<std::wstring>& input, std
 		}
 		else
 		{
-			input.emplace_back(GetFullPathName(argv[i]).get());
+			options.input.emplace_back(GetFullPathName(argv[i]).get());
 		}
 	}
-	if (input.empty())
+	if (options.input.empty())
 	{
 		throw std::runtime_error("missing input directory");
 	}
 }
 
+void MoveFileToRecycleBin(const std::wstring& path)
+{
+	std::wstring from = path;
+	from.push_back(L'\0');
+	from.push_back(L'\0');
+
+	SHFILEOPSTRUCTW fileOp{};
+	fileOp.wFunc = FO_DELETE;
+	fileOp.pFrom = from.c_str();
+	fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+	int result = SHFileOperationW(&fileOp);
+	if (result != 0 || fileOp.fAnyOperationsAborted)
+		throw std::runtime_error("failed to move duplicate file to recycle bin");
+}
+
 void PrintHelp()
 {
 	std::wcout << SetOutputDefault
-		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-dedup] [-worker WorkerCount] Directory... \n"
+		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-dedup] [-delete-duplicates] [-worker WorkerCount] Directory... \n"
 		<< "\t-output OutputFile: path to the output\n"
 		<< "\t-dedup: enable deduplication of files\n"
+		<< "\t-delete-duplicates: deduplicate files and move redundant copies to recycle bin\n"
 		<< "\t-worker WorkerCount: set work thread count, default is half of your processor count\n"
 		<< "\tDirectory: directories need to build index" << std::endl;
 }
@@ -113,12 +144,10 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 	try
 	{
 		// validate arguments
-		std::vector<std::wstring> input;
-		std::wstring output;
-		bool deduplicate;
+		ProgramOptions options;
 		try
 		{
-			FindOptions(argc, argv, input, output, deduplicate);
+			FindOptions(argc, argv, options);
 		}
 		catch (std::exception& e)
 		{
@@ -131,7 +160,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			<< std::endl;
 
 		std::wcout << SetOutputDefault << "Input directory: \n";
-		for (auto& i : input)
+		for (auto& i : options.input)
 		{
 			if (!IsDirectory(i.c_str()))
 			{
@@ -141,28 +170,28 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			std::wcout << "    " << SetOutputYellow << i << std::endl;
 		}
 
-		if (output.empty())
+		if (options.output.empty())
 		{
 			std::wcout << SetOutputYellow << "Output file path not specified. Generate path from first input." <<
 				std::endl;
-			output = input[0];
-			if (output.back() != '\\')output.push_back('\\');
-			output += L"FontIndex.xml";
-			std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << output << std::endl;
+			options.output = options.input[0];
+			if (options.output.back() != '\\')options.output.push_back('\\');
+			options.output += L"FontIndex.xml";
+			std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << options.output << std::endl;
 			while (AskConsoleQuestionBoolean(L"Do you want to change output path?"))
 			{
 				std::wcout << "Enter output path: ";
 
 				std::wstring userPath = ConsoleReadLine();
-				output = userPath;
-				std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << output << std::endl;
+				options.output = userPath;
+				std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << options.output << std::endl;
 			}
 		}
 		else
 		{
-			std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << output << std::endl;
+			std::wcout << SetOutputDefault << L"Output path: \n    " << SetOutputYellow << options.output << std::endl;
 		}
-		if (output.empty())
+		if (options.output.empty())
 		{
 			std::wcout << SetOutputRed << L"Output path is empty!" << std::endl << SetOutputDefault;
 			return 1;
@@ -173,7 +202,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 
 		std::vector<std::wstring> fileSet;
 		std::vector<uint64_t> fileSize;
-		for (auto& i : input)
+		for (auto& i : options.input)
 		{
 			ScanDirectory(i.c_str(), fileSet, fileSize, [](const wchar_t* path)
 			{
@@ -196,14 +225,15 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			return 0;
 		}
 
-		if (deduplicate)
+		if (options.deduplicate)
 		{
 			std::wcout << "Deduplicate..." << std::endl;
 			std::atomic<size_t> progress = 0;
 			const size_t total = fileSet.size();
+			DeduplicateResult deduplicateResult;
 			std::thread thr([&]()
 			{
-				fileSet = Deduplicate(fileSet, fileSize, progress);
+				deduplicateResult = Deduplicate(fileSet, fileSize, progress);
 			});
 			while (!g_cancelToken)
 			{
@@ -217,6 +247,24 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 				thr.join();
 			std::wcout << std::endl;
 			ThrowIfCancelled();
+			fileSet = std::move(deduplicateResult.uniqueFiles);
+			if (options.deleteDuplicates)
+			{
+				std::wcout << "Move duplicates to recycle bin..." << std::endl;
+				for (auto& duplicatePath : deduplicateResult.duplicateFiles)
+				{
+					try
+					{
+						MoveFileToRecycleBin(duplicatePath);
+					}
+					catch (std::exception& e)
+					{
+						std::wcout << SetOutputRed << L"Failed to recycle duplicate file: " << duplicatePath <<
+							std::endl;
+						std::cout << e.what() << std::endl << SetOutputDefault;
+					}
+				}
+			}
 			std::wcout << "Discovered " << fileSet.size() << " files." << std::endl;
 		}
 
@@ -295,7 +343,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 
 		std::wcout << "Writing output..." << std::endl;
 
-		sfh::FontDatabase::WriteToFile(output, db);
+		sfh::FontDatabase::WriteToFile(options.output, db);
 
 		std::wcout << "Done." << std::endl;
 	}

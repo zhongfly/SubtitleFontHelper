@@ -123,12 +123,19 @@ namespace
 
 	struct FileRecord
 	{
-		uint8_t sha1[SHA1_DIGEST_LENGTH];
-		const std::wstring* path;
+		uint8_t sha1[SHA1_DIGEST_LENGTH]{};
+		const std::wstring* path = nullptr;
 
 		bool operator<(const FileRecord& rhs) const
 		{
-			return memcmp(sha1, rhs.sha1, SHA1_DIGEST_LENGTH) < 0;
+			auto compare = memcmp(sha1, rhs.sha1, SHA1_DIGEST_LENGTH);
+			if (compare != 0)
+				return compare < 0;
+			if (path == nullptr)
+				return false;
+			if (rhs.path == nullptr)
+				return true;
+			return *path < *rhs.path;
 		}
 
 		bool operator==(const FileRecord& rhs) const
@@ -146,13 +153,14 @@ namespace
 	};
 }
 
-std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, const std::vector<uint64_t>& inputSize,
-                                      std::atomic<size_t>& progress)
+DeduplicateResult Deduplicate(const std::vector<std::wstring>& input, const std::vector<uint64_t>& inputSize,
+                              std::atomic<size_t>& progress)
 {
-	std::vector<std::wstring> ret;
+	DeduplicateResult ret;
 	std::unordered_map<uint64_t, RecordStorage> lookupTable;
 
-	ret.reserve(input.size());
+	ret.uniqueFiles.reserve(input.size());
+	ret.duplicateFiles.reserve(input.size());
 
 	for (size_t idx = 0; idx < input.size(); ++idx)
 	{
@@ -184,7 +192,7 @@ std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, co
 	{
 		if (group.second.nextIndex == 1)
 		{
-			ret.emplace_back(*group.second.records[0].path);
+			ret.uniqueFiles.emplace_back(*group.second.records[0].path);
 		}
 		else
 		{
@@ -201,7 +209,7 @@ std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, co
 		}
 	}
 
-	progress += ret.size();
+	progress += ret.uniqueFiles.size();
 
 	std::vector<std::thread> workers;
 	for (size_t i = 0; i < g_WorkerCount; ++i)
@@ -245,27 +253,42 @@ std::vector<std::wstring> Deduplicate(const std::vector<std::wstring>& input, co
 		auto& storage = group.second;
 		if (storage.nextIndex <= 1)
 			continue;
+
+		auto collectGroup = [&](auto begin, auto end)
+		{
+			auto groupBegin = begin;
+			while (groupBegin != end)
+			{
+				auto groupEnd = groupBegin + 1;
+				while (groupEnd != end && *groupBegin == *groupEnd)
+					++groupEnd;
+
+				auto keep = std::find_if(groupBegin, groupEnd, [](const FileRecord& item)
+				{
+					return item.path != nullptr;
+				});
+				if (keep != groupEnd)
+					ret.uniqueFiles.emplace_back(*keep->path);
+
+				for (auto it = groupBegin; it != groupEnd; ++it)
+				{
+					if (it->path == nullptr || it == keep)
+						continue;
+					ret.duplicateFiles.emplace_back(*it->path);
+				}
+				groupBegin = groupEnd;
+			}
+		};
+
 		if (storage.vec)
 		{
 			std::sort(storage.vec->begin(), storage.vec->end());
-			auto last = std::unique(storage.vec->begin(), storage.vec->end());
-			for (auto it = storage.vec->begin(); it != last; ++it)
-			{
-				if (!it->path)
-					continue;
-				ret.emplace_back(*it->path);
-			}
+			collectGroup(storage.vec->begin(), storage.vec->end());
 		}
 		else
 		{
 			std::sort(storage.records, storage.records + storage.nextIndex);
-			auto last = std::unique(storage.records, storage.records + storage.nextIndex);
-			for (auto it = storage.records; it != last; ++it)
-			{
-				if (!it->path)
-					continue;
-				ret.emplace_back(*it->path);
-			}
+			collectGroup(storage.records, storage.records + storage.nextIndex);
 		}
 	}
 

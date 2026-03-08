@@ -118,6 +118,40 @@ void PrintHelp()
 		<< "\tDirectory: directories need to build index" << std::endl;
 }
 
+size_t CountDuplicateFiles(const DeduplicateResult& deduplicateResult)
+{
+	size_t total = 0;
+	for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
+	{
+		total += duplicateGroup.duplicateFiles.size();
+	}
+	return total;
+}
+
+void PrintDuplicateFiles(const DeduplicateResult& deduplicateResult)
+{
+	if (deduplicateResult.duplicateGroups.empty())
+	{
+		std::wcout << SetOutputGreen << L"No duplicate files found." << std::endl << SetOutputDefault;
+		return;
+	}
+
+	std::wcout << SetOutputYellow << L"Duplicate groups: " << deduplicateResult.duplicateGroups.size()
+		<< L", duplicate files: " << CountDuplicateFiles(deduplicateResult) << std::endl
+		<< SetOutputDefault;
+
+	for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
+	{
+		std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.keepFile << std::endl;
+		for (const auto& duplicatePath : duplicateGroup.duplicateFiles)
+		{
+			std::wcout << L"  " << SetOutputYellow << L"[Duplicate] " << SetOutputDefault << duplicatePath <<
+				std::endl;
+		}
+		std::wcout << std::endl;
+	}
+}
+
 int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 {
 	// set control signal handler
@@ -247,21 +281,39 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 				thr.join();
 			std::wcout << std::endl;
 			ThrowIfCancelled();
+			PrintDuplicateFiles(deduplicateResult);
 			fileSet = std::move(deduplicateResult.uniqueFiles);
 			if (options.deleteDuplicates)
 			{
-				std::wcout << "Move duplicates to recycle bin..." << std::endl;
-				for (auto& duplicatePath : deduplicateResult.duplicateFiles)
+				if (deduplicateResult.duplicateGroups.empty())
 				{
-					try
+					std::wcout << "Move duplicates to recycle bin..." << std::endl;
+					std::wcout << SetOutputGreen << L"No duplicate files to recycle." << std::endl <<
+						SetOutputDefault;
+				}
+				else
+				{
+					std::wcout << "Move duplicates to recycle bin..." << std::endl;
+					for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
 					{
-						MoveFileToRecycleBin(duplicatePath);
-					}
-					catch (std::exception& e)
-					{
-						std::wcout << SetOutputRed << L"Failed to recycle duplicate file: " << duplicatePath <<
+						std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.keepFile <<
 							std::endl;
-						std::cout << e.what() << std::endl << SetOutputDefault;
+						for (const auto& duplicatePath : duplicateGroup.duplicateFiles)
+						{
+							try
+							{
+								MoveFileToRecycleBin(duplicatePath);
+								std::wcout << L"  " << SetOutputYellow << L"[Recycled] " << SetOutputDefault <<
+									duplicatePath << std::endl;
+							}
+							catch (std::exception& e)
+							{
+								std::wcout << L"  " << SetOutputRed << L"[Failed] " << duplicatePath <<
+									std::endl;
+								std::cout << e.what() << std::endl << SetOutputDefault;
+							}
+						}
+						std::wcout << std::endl;
 					}
 				}
 			}

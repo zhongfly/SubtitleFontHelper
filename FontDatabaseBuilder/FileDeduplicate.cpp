@@ -160,7 +160,7 @@ DeduplicateResult Deduplicate(const std::vector<std::wstring>& input, const std:
 	std::unordered_map<uint64_t, RecordStorage> lookupTable;
 
 	ret.uniqueFiles.reserve(input.size());
-	ret.duplicateFiles.reserve(input.size());
+	ret.duplicateGroups.reserve(input.size());
 
 	for (size_t idx = 0; idx < input.size(); ++idx)
 	{
@@ -268,13 +268,22 @@ DeduplicateResult Deduplicate(const std::vector<std::wstring>& input, const std:
 					return item.path != nullptr;
 				});
 				if (keep != groupEnd)
-					ret.uniqueFiles.emplace_back(*keep->path);
-
-				for (auto it = groupBegin; it != groupEnd; ++it)
 				{
-					if (it->path == nullptr || it == keep)
-						continue;
-					ret.duplicateFiles.emplace_back(*it->path);
+					ret.uniqueFiles.emplace_back(*keep->path);
+					DeduplicateResult::DuplicateGroup duplicateGroup;
+					duplicateGroup.keepFile = *keep->path;
+					duplicateGroup.duplicateFiles.reserve(static_cast<size_t>(groupEnd - groupBegin));
+
+					for (auto it = groupBegin; it != groupEnd; ++it)
+					{
+						if (it->path == nullptr || it == keep)
+							continue;
+						duplicateGroup.duplicateFiles.emplace_back(*it->path);
+					}
+					if (!duplicateGroup.duplicateFiles.empty())
+					{
+						ret.duplicateGroups.emplace_back(std::move(duplicateGroup));
+					}
 				}
 				groupBegin = groupEnd;
 			}

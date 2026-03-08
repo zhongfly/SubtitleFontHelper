@@ -14,6 +14,30 @@
 #include <wil/resource.h>
 #include <wil/com.h>
 
+namespace
+{
+	std::once_flag g_comSecurityInitFlag;
+
+	void EnsureComSecurityInitialized()
+	{
+		std::call_once(g_comSecurityInitFlag, []()
+		{
+			auto hr = CoInitializeSecurity(
+				nullptr,
+				-1,
+				nullptr,
+				nullptr,
+				RPC_C_AUTHN_LEVEL_DEFAULT,
+				RPC_C_IMP_LEVEL_IMPERSONATE,
+				nullptr,
+				EOAC_NONE,
+				nullptr);
+			if (FAILED(hr) && hr != RPC_E_TOO_LATE)
+				THROW_IF_FAILED(hr);
+		});
+	}
+}
+
 class sfh::ProcessMonitor::Implementation
 {
 private:
@@ -150,18 +174,7 @@ private:
 	void WorkerProcedure()
 	{
 		auto com = wil::CoInitializeEx();
-
-		THROW_IF_FAILED(CoInitializeSecurity(
-			nullptr,
-			-1,
-			nullptr,
-			nullptr,
-			RPC_C_AUTHN_LEVEL_DEFAULT,
-			RPC_C_IMP_LEVEL_IMPERSONATE,
-			nullptr,
-			EOAC_NONE,
-			nullptr
-		));
+		EnsureComSecurityInitialized();
 
 		auto wbemLocator = wil::CoCreateInstance<IWbemLocator>(CLSID_WbemLocator);
 		wil::com_ptr<IWbemServices> wbemService;

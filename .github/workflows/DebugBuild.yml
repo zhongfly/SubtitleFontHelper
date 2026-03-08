@@ -34,10 +34,6 @@ jobs:
         New-Item -Type Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE"
         echo "VCPKG_DEFAULT_BINARY_CACHE=$env:VCPKG_DEFAULT_BINARY_CACHE" >> $env:GITHUB_ENV
 
-    - name: Restore NuGet packages
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: nuget restore ${{env.SOLUTION_FILE_PATH}}
-
     - name: Vcpkg integrate
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: vcpkg integrate install

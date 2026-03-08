@@ -37,6 +37,13 @@ namespace
 		return static_cast<uint32_t>(ret);
 	}
 
+	bool XmlNameEquals(const wchar_t* actual, int actualLength, const wchar_t* expected)
+	{
+		return actualLength >= 0
+			&& static_cast<size_t>(actualLength) == wcslen(expected)
+			&& wcsncmp(actual, expected, actualLength) == 0;
+	}
+
 	class SimpleSAXContentHandler : public ISAXContentHandler
 	{
 	private:
@@ -153,6 +160,7 @@ namespace
 
 		std::unique_ptr<sfh::ConfigFile> m_config;
 		std::vector<ElementType> m_status;
+		size_t m_ignoreDepth = 0;
 
 	public:
 		HRESULT STDMETHODCALLTYPE startDocument() override
@@ -160,6 +168,7 @@ namespace
 			m_config = std::make_unique<sfh::ConfigFile>();
 			m_status.clear();
 			m_status.emplace_back(ElementType::Document);
+			m_ignoreDepth = 0;
 			return S_OK;
 		}
 
@@ -177,12 +186,17 @@ namespace
 		                                       int cchLocalName, const wchar_t* pwchQName, int cchQName,
 		                                       ISAXAttributes* pAttributes) override
 		{
+			if (m_ignoreDepth != 0)
+			{
+				++m_ignoreDepth;
+				return S_OK;
+			}
 			if (m_status.empty())
 				return E_FAIL;
 			switch (m_status.back())
 			{
 			case ElementType::Document:
-				if (wcsncmp(pwchLocalName, L"ConfigFile", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"ConfigFile"))
 				{
 					m_status.emplace_back(ElementType::RootElement);
 					const wchar_t* attrValue;
@@ -229,26 +243,26 @@ namespace
 				}
 				break;
 			case ElementType::RootElement:
-				if (wcsncmp(pwchLocalName, L"IndexFile", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"IndexFile"))
 				{
 					m_config->m_indexFile.emplace_back();
 					m_status.emplace_back(ElementType::IndexFileElement);
 				}
-				else if (wcsncmp(pwchLocalName, L"MonitorProcess", cchLocalName) == 0)
+				else if (XmlNameEquals(pwchLocalName, cchLocalName, L"MonitorProcess"))
 				{
 					m_config->m_monitorProcess.emplace_back();
 					m_status.emplace_back(ElementType::MonitorElement);
 				}
 				else
 				{
-					return E_FAIL;
+					m_ignoreDepth = 1;
 				}
 				break;
 			case ElementType::IndexFileElement:
-				return E_FAIL;
+				m_ignoreDepth = 1;
 				break;
 			case ElementType::MonitorElement:
-				return E_FAIL;
+				m_ignoreDepth = 1;
 				break;
 			default:
 				return E_FAIL;
@@ -260,12 +274,17 @@ namespace
 		                                     const wchar_t* pwchLocalName,
 		                                     int cchLocalName, const wchar_t* pwchQName, int cchQName) override
 		{
+			if (m_ignoreDepth != 0)
+			{
+				--m_ignoreDepth;
+				return S_OK;
+			}
 			if (m_status.empty())
 				return E_FAIL;
 			switch (m_status.back())
 			{
 			case ElementType::RootElement:
-				if (wcsncmp(pwchLocalName, L"ConfigFile", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"ConfigFile"))
 				{
 					m_status.pop_back();
 				}
@@ -275,7 +294,7 @@ namespace
 				}
 				break;
 			case ElementType::IndexFileElement:
-				if (wcsncmp(pwchLocalName, L"IndexFile", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"IndexFile"))
 				{
 					m_status.pop_back();
 				}
@@ -285,7 +304,7 @@ namespace
 				}
 				break;
 			case ElementType::MonitorElement:
-				if (wcsncmp(pwchLocalName, L"MonitorProcess", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"MonitorProcess"))
 				{
 					m_status.pop_back();
 				}
@@ -302,15 +321,17 @@ namespace
 
 		HRESULT STDMETHODCALLTYPE characters(const wchar_t* pwchChars, int cchChars) override
 		{
+			if (m_ignoreDepth != 0)
+				return S_OK;
 			if (m_status.empty())
 				return E_FAIL;
 			switch (m_status.back())
 			{
 			case ElementType::IndexFileElement:
-				m_config->m_indexFile.back().m_path.assign(pwchChars, cchChars);
+				m_config->m_indexFile.back().m_path.append(pwchChars, cchChars);
 				break;
 			case ElementType::MonitorElement:
-				m_config->m_monitorProcess.back().m_name.assign(pwchChars, cchChars);
+				m_config->m_monitorProcess.back().m_name.append(pwchChars, cchChars);
 				break;
 			}
 			// ignore unexpected characters

@@ -16,6 +16,14 @@ namespace sfh
 {
 	namespace
 	{
+		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
+		{
+			if (isCancelled && isCancelled())
+			{
+				throw std::runtime_error("Operation cancelled");
+			}
+		}
+
 		std::wstring GetDisplayName(const std::filesystem::path& path)
 		{
 			return path.filename().empty() ? path.wstring() : path.filename().wstring();
@@ -49,6 +57,30 @@ namespace sfh
 		}
 	}
 
+	size_t BuildManagedIndex(
+		const ManagedIndexBuilder::Task& task,
+		size_t workerCount,
+		const std::function<bool()>& isCancelled)
+	{
+		auto files = FontIndexCore::EnumerateFontFiles(task.m_sourceFolders, isCancelled);
+		std::vector<std::filesystem::path> fontPaths;
+		fontPaths.reserve(files.size());
+		for (const auto& file : files)
+		{
+			fontPaths.push_back(file.m_path);
+		}
+
+		auto db = FontIndexCore::BuildFontDatabase(fontPaths, workerCount, isCancelled);
+		ThrowIfCancelled(isCancelled);
+		WriteFontDatabaseAtomically(task.m_indexPath, db);
+
+		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
+		ThrowIfCancelled(isCancelled);
+		FontIndexCore::WriteDirectorySnapshot(task.m_snapshotPath, snapshot);
+		ThrowIfCancelled(isCancelled);
+		return fontPaths.size();
+	}
+
 	ManagedIndexBuilder::ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount)
 		: m_worker([daemon, task = std::move(task), workerCount](std::stop_token stopToken)
 		{
@@ -62,35 +94,11 @@ namespace sfh
 					return stopToken.stop_requested();
 				};
 
-				auto files = FontIndexCore::EnumerateFontFiles(task.m_sourceFolders, isCancelled);
-				std::vector<std::filesystem::path> fontPaths;
-				fontPaths.reserve(files.size());
-				for (const auto& file : files)
-				{
-					fontPaths.push_back(file.m_path);
-				}
-
-				auto db = FontIndexCore::BuildFontDatabase(fontPaths, workerCount, isCancelled);
-				if (stopToken.stop_requested())
-				{
-					return;
-				}
-
-				WriteFontDatabaseAtomically(task.m_indexPath, db);
-				auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
-				if (stopToken.stop_requested())
-				{
-					return;
-				}
-				FontIndexCore::WriteDirectorySnapshot(task.m_snapshotPath, snapshot);
-				if (stopToken.stop_requested())
-				{
-					return;
-				}
+				const auto fontFileCount = BuildManagedIndex(task, workerCount, isCancelled);
 
 				TryShowToast(
 					L"Subtitle Font Helper",
-					L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontPaths.size()) + L" 个）");
+					L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
 				daemon->NotifyManagedIndexBuilt();
 			}
 			catch (const std::exception& e)

@@ -206,6 +206,7 @@
     <ClCompile Include="ConfigWatcher.cpp" />
     <ClCompile Include="FontQuery.pb.cpp" />
     <ClCompile Include="ManagedIndexBuilder.cpp" />
+    <ClCompile Include="ManagedIndexWatcher.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="Prefetch.cpp" />
@@ -245,6 +246,7 @@
     <ClInclude Include="ConfigWatcher.h" />
     <ClInclude Include="IDaemon.h" />
     <ClInclude Include="ManagedIndexBuilder.h" />
+    <ClInclude Include="ManagedIndexWatcher.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Prefetch.h" />
     <ClInclude Include="ProcessMonitor.h" />

@@ -3,6 +3,8 @@
 #include "pch.h"
 #include "IDaemon.h"
 
+#include <functional>
+
 namespace sfh
 {
 	class ManagedIndexBuilder
@@ -27,4 +29,9 @@ namespace sfh
 	private:
 		std::jthread m_worker;
 	};
+
+	size_t BuildManagedIndex(
+		const ManagedIndexBuilder::Task& task,
+		size_t workerCount,
+		const std::function<bool()>& isCancelled = {});
 }

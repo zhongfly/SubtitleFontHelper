@@ -6,6 +6,7 @@
 #include "PersistantData.h"
 #include "ConfigWatcher.h"
 #include "ManagedIndexBuilder.h"
+#include "ManagedIndexWatcher.h"
 #include "QueryService.h"
 #include "RpcServer.h"
 #include "ProcessMonitor.h"
@@ -154,6 +155,7 @@ namespace sfh
 			std::unique_ptr<Prefetch> m_prefetch;
 			std::unique_ptr<ConfigWatcher> m_configWatcher;
 			std::vector<std::unique_ptr<ManagedIndexBuilder>> m_managedIndexBuilders;
+			std::vector<std::unique_ptr<ManagedIndexWatcher>> m_managedIndexWatchers;
 			std::vector<IndexSlot> m_indexSlots;
 		};
 
@@ -281,6 +283,7 @@ namespace sfh
 			std::vector<std::unique_ptr<FontDatabase>> dbs;
 			std::vector<std::filesystem::path> watchFiles;
 			std::vector<ManagedIndexBuilder::Task> managedIndexBuildTasks;
+			std::vector<ManagedIndexWatcher::Options> managedIndexWatchOptions;
 			AppendConfigWatchFiles(watchFiles, selfPath);
 			for (auto& indexFile : cfg->m_indexFile)
 			{
@@ -289,16 +292,25 @@ namespace sfh
 				newService->m_indexSlots.push_back({ indexPath, isManagedIndex });
 				if (isManagedIndex)
 				{
+					auto sourceFolders = ResolveSourceFolders(indexFile);
+					ManagedIndexBuilder::Task managedTask;
+					managedTask.m_indexPath = indexPath;
+					managedTask.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
+					managedTask.m_sourceFolders = sourceFolders;
+
+					ManagedIndexWatcher::Options watchOptions;
+					watchOptions.m_task = managedTask;
+					watchOptions.m_workerCount = managedBuildWorkerCount;
+
 					std::error_code ec;
 					if (!std::filesystem::exists(indexPath, ec) || ec)
 					{
-						ManagedIndexBuilder::Task task;
-						task.m_indexPath = indexPath;
-						task.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
-						task.m_sourceFolders = ResolveSourceFolders(indexFile);
-						managedIndexBuildTasks.push_back(std::move(task));
+						watchOptions.m_skipInitialSync = true;
+						managedIndexBuildTasks.push_back(std::move(managedTask));
+						managedIndexWatchOptions.push_back(std::move(watchOptions));
 						continue;
 					}
+					managedIndexWatchOptions.push_back(std::move(watchOptions));
 				}
 
 				if (!isManagedIndex)
@@ -325,6 +337,11 @@ namespace sfh
 			newService->m_processMonitor->SetMonitorList(std::move(monitorProcess));
 			newService->m_configWatcher = std::make_unique<ConfigWatcher>(this, std::move(watchFiles));
 			m_service = std::move(newService);
+			for (auto& options : managedIndexWatchOptions)
+			{
+				m_service->m_managedIndexWatchers.emplace_back(
+					std::make_unique<ManagedIndexWatcher>(this, std::move(options)));
+			}
 			for (auto& task : managedIndexBuildTasks)
 			{
 				m_service->m_managedIndexBuilders.emplace_back(

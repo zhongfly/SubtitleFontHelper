@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FontDatabaseBuilder", "Font
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PersistantDataLib", "PersistantDataLib\PersistantDataLib.vcxproj", "{FA23B3DF-0DAC-4203-93F3-F94A773607D5}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FontIndexCore", "FontIndexCore\FontIndexCore.vcxproj", "{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SharedIncludes", "SharedIncludes\SharedIncludes.vcxitems", "{52E56318-5893-4435-A8E6-9DF24010B6DB}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FontLoadInterceptor", "FontLoadInterceptor\FontLoadInterceptor.vcxproj", "{C3CC2949-C24F-4217-A7A7-B2B0FAABAFA0}"
@@ -47,6 +49,14 @@ Global
 		{FA23B3DF-0DAC-4203-93F3-F94A773607D5}.Release|x64.Build.0 = Release|x64
 		{FA23B3DF-0DAC-4203-93F3-F94A773607D5}.Release|x86.ActiveCfg = Release|Win32
 		{FA23B3DF-0DAC-4203-93F3-F94A773607D5}.Release|x86.Build.0 = Release|Win32
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Debug|x64.ActiveCfg = Debug|x64
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Debug|x64.Build.0 = Debug|x64
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Debug|x86.ActiveCfg = Debug|Win32
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Debug|x86.Build.0 = Debug|Win32
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Release|x64.ActiveCfg = Release|x64
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Release|x64.Build.0 = Release|x64
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Release|x86.ActiveCfg = Release|Win32
+		{2C271190-3D48-4FCF-BD8B-4A5E9BE09C3D}.Release|x86.Build.0 = Release|Win32
 		{C3CC2949-C24F-4217-A7A7-B2B0FAABAFA0}.Debug|x64.ActiveCfg = Debug|x64
 		{C3CC2949-C24F-4217-A7A7-B2B0FAABAFA0}.Debug|x64.Build.0 = Debug|x64
 		{C3CC2949-C24F-4217-A7A7-B2B0FAABAFA0}.Debug|x86.ActiveCfg = Debug|Win32
@@ -72,6 +82,7 @@ Global
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		SharedIncludes\SharedIncludes.vcxitems*{36b0a3ad-cdef-413c-9926-dbfefdd72d97}*SharedItemsImports = 4
+		SharedIncludes\SharedIncludes.vcxitems*{2c271190-3d48-4fcf-bd8b-4a5e9be09c3d}*SharedItemsImports = 4
 		SharedIncludes\SharedIncludes.vcxitems*{52e56318-5893-4435-a8e6-9df24010b6db}*SharedItemsImports = 9
 		SharedIncludes\SharedIncludes.vcxitems*{b4a7e053-c8d0-4d46-8350-c92511beef9e}*SharedItemsImports = 4
 		SharedIncludes\SharedIncludes.vcxitems*{d6a10992-4ba7-4efe-89ae-7ca2734a1810}*SharedItemsImports = 4

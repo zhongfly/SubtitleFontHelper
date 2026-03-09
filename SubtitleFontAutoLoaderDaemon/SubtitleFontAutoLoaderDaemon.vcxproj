@@ -254,6 +254,9 @@
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\FontIndexCore\FontIndexCore.vcxproj">
+      <Project>{2c271190-3d48-4fcf-bd8b-4a5e9be09c3d}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\Generated\Generated.vcxproj">
       <Project>{d6a10992-4ba7-4efe-89ae-7ca2734a1810}</Project>
     </ProjectReference>

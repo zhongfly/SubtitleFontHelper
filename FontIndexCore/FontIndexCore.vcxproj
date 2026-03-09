@@ -200,6 +200,7 @@
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="FontDatabaseBuild.cpp" />
     <ClCompile Include="FontIndexCore.cpp" />
   </ItemGroup>
   <ItemGroup>

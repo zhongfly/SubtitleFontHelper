@@ -1,6 +1,7 @@
 #include "FontIndexCore.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <system_error>
 
 namespace FontIndexCore
@@ -13,6 +14,14 @@ namespace FontIndexCore
 			std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
 			return extension;
 		}
+
+		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
+		{
+			if (isCancelled && isCancelled())
+			{
+				throw std::runtime_error("Operation cancelled");
+			}
+		}
 	}
 
 	bool IsSupportedFontFile(const std::filesystem::path& path)
@@ -21,11 +30,14 @@ namespace FontIndexCore
 		return extension == L".ttf" || extension == L".otf" || extension == L".ttc" || extension == L".otc";
 	}
 
-	std::vector<FontSourceFile> EnumerateFontFiles(const std::vector<std::filesystem::path>& sourceFolders)
+	std::vector<FontSourceFile> EnumerateFontFiles(
+		const std::vector<std::filesystem::path>& sourceFolders,
+		const std::function<bool()>& isCancelled)
 	{
 		std::vector<FontSourceFile> files;
 		for (const auto& sourceFolder : sourceFolders)
 		{
+			ThrowIfCancelled(isCancelled);
 			std::error_code err;
 			if (!std::filesystem::exists(sourceFolder, err))
 			{
@@ -33,6 +45,7 @@ namespace FontIndexCore
 			}
 			for (std::filesystem::recursive_directory_iterator iter(sourceFolder, std::filesystem::directory_options::skip_permission_denied, err), end; iter != end; iter.increment(err))
 			{
+				ThrowIfCancelled(isCancelled);
 				if (err)
 				{
 					err.clear();
@@ -50,7 +63,13 @@ namespace FontIndexCore
 				{
 					continue;
 				}
-				files.push_back({ iter->path() });
+				const auto fileSize = iter->file_size(err);
+				if (err)
+				{
+					err.clear();
+					continue;
+				}
+				files.push_back({ iter->path(), static_cast<uint64_t>(fileSize) });
 			}
 		}
 		return files;

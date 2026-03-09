@@ -1,8 +1,8 @@
 #include "Common.h"
 #include "ConsoleHelper.h"
 #include "Win32Helper.h"
-#include "FontAnalyzer.h"
 #include "FileDeduplicate.h"
+#include "../FontIndexCore/FontIndexCore.h"
 
 #include <shellapi.h>
 #pragma comment(lib, "Shell32.lib")
@@ -234,22 +234,26 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 
 		std::wcout << "WORKER_COUNT = " << g_WorkerCount << std::endl;
 
+		std::vector<std::filesystem::path> inputDirectories;
+		inputDirectories.reserve(options.input.size());
+		for (const auto& directory : options.input)
+		{
+			inputDirectories.emplace_back(directory);
+		}
+
+		auto discoveredFiles = FontIndexCore::EnumerateFontFiles(inputDirectories, []()
+		{
+			return g_cancelToken.load();
+		});
+
 		std::vector<std::wstring> fileSet;
 		std::vector<uint64_t> fileSize;
-		for (auto& i : options.input)
+		fileSet.reserve(discoveredFiles.size());
+		fileSize.reserve(discoveredFiles.size());
+		for (const auto& file : discoveredFiles)
 		{
-			ScanDirectory(i.c_str(), fileSet, fileSize, [](const wchar_t* path)
-			{
-				constexpr const wchar_t* acceptExt[] = {L".ttf", L".otf", L".ttc", L".otc"};
-				constexpr size_t acceptExtLen[] = {4, 4, 4, 4};
-				size_t length = wcslen(path);
-				for (size_t i = 0; i < std::extent_v<decltype(acceptExt)>; ++i)
-				{
-					if (_wcsicmp(path + length - acceptExtLen[i], acceptExt[i]) == 0)
-						return true;
-				}
-				return false;
-			});
+			fileSet.emplace_back(file.m_path.c_str());
+			fileSize.emplace_back(file.m_fileSize);
 		}
 		std::wcout << "Discovered " << fileSet.size() << " files." << std::endl;
 
@@ -323,72 +327,48 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 		std::wcout << "Build database..." << std::endl;
 
 		std::mutex logLock;
-		std::mutex consumeLock;
-		std::mutex resultLock;
-
-		auto nextFile = fileSet.begin();
-		auto noFile = fileSet.end();
-
 		sfh::FontDatabase db;
-		db.m_fonts.reserve(fileSet.size()); // reduce reallocation
-
-		std::vector<std::thread> workers;
-		for (size_t i = 0; i < g_WorkerCount; ++i)
+		std::vector<std::filesystem::path> filesToAnalyze;
+		filesToAnalyze.reserve(fileSet.size());
+		for (const auto& file : fileSet)
 		{
-			workers.emplace_back([&]()
-			{
-				FontAnalyzer analyzer;
-				while (!g_cancelToken)
-				{
-					std::vector<std::wstring>::iterator path;
-					try
-					{
-						{
-							std::lock_guard lg(consumeLock);
-							if (nextFile == noFile)break;
-							path = nextFile;
-							++nextFile;
-						}
-						auto result = analyzer.AnalyzeFontFile(path->c_str());
-						{
-							std::lock_guard lg(resultLock);
-							db.m_fonts.insert(db.m_fonts.end(),
-							                  std::make_move_iterator(result.begin()),
-							                  std::make_move_iterator(result.end()));
-						}
-					}
-					catch (std::exception& e)
-					{
-						std::lock_guard lg(logLock);
-						EraseLineStruct::EraseLine();
-						std::wcout << SetOutputRed << L"Error analyzing file: " << *path << L'\n';
-						std::cout << "Error description: " << e.what() << std::endl << SetOutputDefault;
-					}
-				}
-			});
+			filesToAnalyze.emplace_back(file);
 		}
+
+		std::atomic<size_t> progress = 0;
+		std::thread buildThread([&]()
+		{
+			db = FontIndexCore::BuildFontDatabase(
+				filesToAnalyze,
+				g_WorkerCount,
+				[]()
+				{
+					return g_cancelToken.load();
+				},
+				&progress,
+				[&](const std::filesystem::path& path, const std::string& errorMessage)
+				{
+					std::lock_guard lg(logLock);
+					EraseLineStruct::EraseLine();
+					std::wcout << SetOutputRed << L"Error analyzing file: " << path.c_str() << L'\n';
+					std::cout << "Error description: " << errorMessage << std::endl << SetOutputDefault;
+				});
+		});
 
 		while (!g_cancelToken)
 		{
 			{
 				std::lock_guard lg(logLock);
-				size_t done;
-				{
-					std::lock_guard lg2(consumeLock);
-					done = nextFile - fileSet.begin();
-				}
-
 				EraseLineStruct::EraseLine();
-				PrintProgressBar(done, fileSet.size(), 28);
-				if (done == fileSet.size())
+				PrintProgressBar(progress.load(), filesToAnalyze.size(), 28);
+				if (progress == filesToAnalyze.size())
 					break;
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
-		for (auto& thr : workers)
+		if (buildThread.joinable())
 		{
-			if (thr.joinable())
-				thr.join();
+			buildThread.join();
 		}
 		ThrowIfCancelled();
 		std::wcout << std::endl;

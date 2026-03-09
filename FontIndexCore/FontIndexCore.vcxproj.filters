@@ -11,6 +11,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="FontDatabaseBuild.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="FontIndexCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

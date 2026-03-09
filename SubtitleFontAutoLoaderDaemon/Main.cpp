@@ -9,6 +9,7 @@
 #include "RpcServer.h"
 #include "ProcessMonitor.h"
 #include "Prefetch.h"
+#include "ToastNotifier.h"
 
 #include <queue>
 #include <variant>
@@ -261,6 +262,18 @@ namespace sfh
 			}
 		}
 	}
+
+	bool HasCommandLineFlag(const std::vector<std::wstring>& cmdline, const wchar_t* option)
+	{
+		for (size_t i = 1; i < cmdline.size(); ++i)
+		{
+			if (_wcsicmp(cmdline[i].c_str(), option) == 0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 int __stdcall wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
@@ -272,6 +285,12 @@ int __stdcall wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCm
 	sfh::ProcessCommandLine(cmdline);
 	try
 	{
+		if (sfh::HasCommandLineFlag(cmdline, L"--toast-test"))
+		{
+			sfh::ToastNotifier().ShowTestToast();
+			return 0;
+		}
+
 		sfh::SingleInstanceLock lock;
 		return sfh::Daemon().DaemonMain(cmdline);
 	}

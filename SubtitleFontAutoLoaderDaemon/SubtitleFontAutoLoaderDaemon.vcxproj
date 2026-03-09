@@ -211,6 +211,7 @@
     <ClCompile Include="ProcessMonitor.cpp" />
     <ClCompile Include="QueryService.cpp" />
     <ClCompile Include="RpcServer.cpp" />
+    <ClCompile Include="ToastNotifier.cpp" />
     <ClCompile Include="TrayIcon.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -248,6 +249,7 @@
     <ClInclude Include="QueryService.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="RpcServer.h" />
+    <ClInclude Include="ToastNotifier.h" />
     <ClInclude Include="TrayIcon.h" />
   </ItemGroup>
   <ItemGroup>

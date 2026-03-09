@@ -48,6 +48,9 @@
     <ClCompile Include="Prefetch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ToastNotifier.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common.h">
@@ -78,6 +81,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Prefetch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ToastNotifier.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

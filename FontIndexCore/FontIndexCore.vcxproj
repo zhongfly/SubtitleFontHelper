@@ -203,6 +203,7 @@
     <ClCompile Include="FontDatabaseBuild.cpp" />
     <ClCompile Include="FontDeduplicate.cpp" />
     <ClCompile Include="FontIndexCore.cpp" />
+    <ClCompile Include="FontSnapshot.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FontIndexCore.h" />

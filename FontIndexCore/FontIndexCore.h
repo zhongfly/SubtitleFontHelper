@@ -28,12 +28,38 @@ namespace FontIndexCore
 		std::vector<DuplicateGroup> m_duplicateGroups;
 	};
 
+	struct Hash128Value
+	{
+		uint64_t m_low64 = 0;
+		uint64_t m_high64 = 0;
+	};
+
+	struct DirectorySnapshotEntry
+	{
+		std::filesystem::path m_path;
+		uint64_t m_fileSize = 0;
+		uint64_t m_lastWriteTime = 0;
+		bool m_hasContentHash = false;
+		Hash128Value m_contentHash{};
+	};
+
+	struct DirectorySnapshot
+	{
+		std::vector<DirectorySnapshotEntry> m_files;
+	};
+
 	using FileOperationErrorCallback = std::function<void(const std::filesystem::path&, const std::string&)>;
 
 	bool IsSupportedFontFile(const std::filesystem::path& path);
 	std::vector<FontSourceFile> EnumerateFontFiles(
 		const std::vector<std::filesystem::path>& sourceFolders,
 		const std::function<bool()>& isCancelled = {});
+	std::filesystem::path GetDirectorySnapshotPath(const std::filesystem::path& indexPath);
+	DirectorySnapshot CaptureDirectorySnapshot(
+		const std::vector<std::filesystem::path>& sourceFolders,
+		const std::function<bool()>& isCancelled = {});
+	DirectorySnapshot ReadDirectorySnapshot(const std::filesystem::path& snapshotPath);
+	void WriteDirectorySnapshot(const std::filesystem::path& snapshotPath, const DirectorySnapshot& snapshot);
 	DeduplicateResult DeduplicateFiles(
 		const std::vector<FontSourceFile>& input,
 		size_t workerCount,

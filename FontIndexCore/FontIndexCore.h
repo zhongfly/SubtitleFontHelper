@@ -60,6 +60,16 @@ namespace FontIndexCore
 		const std::function<bool()>& isCancelled = {});
 	DirectorySnapshot ReadDirectorySnapshot(const std::filesystem::path& snapshotPath);
 	void WriteDirectorySnapshot(const std::filesystem::path& snapshotPath, const DirectorySnapshot& snapshot);
+	void PopulateMissingContentHashes(
+		DirectorySnapshot& snapshot,
+		size_t workerCount,
+		const std::function<bool()>& isCancelled = {},
+		std::atomic<size_t>* progress = nullptr,
+		const FileOperationErrorCallback& onError = {});
+	std::vector<std::vector<size_t>> GroupEquivalentFiles(
+		const DirectorySnapshot& snapshot,
+		const std::function<bool()>& isCancelled = {},
+		const FileOperationErrorCallback& onError = {});
 	DeduplicateResult DeduplicateFiles(
 		const std::vector<FontSourceFile>& input,
 		size_t workerCount,

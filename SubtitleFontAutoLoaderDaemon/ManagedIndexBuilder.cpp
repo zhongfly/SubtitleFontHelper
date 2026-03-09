@@ -62,23 +62,24 @@ namespace sfh
 		size_t workerCount,
 		const std::function<bool()>& isCancelled)
 	{
-		auto files = FontIndexCore::EnumerateFontFiles(task.m_sourceFolders, isCancelled);
+		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
+		FontIndexCore::PopulateMissingContentHashes(snapshot, workerCount, isCancelled);
+		auto groups = FontIndexCore::GroupEquivalentFiles(snapshot, isCancelled);
+
 		std::vector<std::filesystem::path> fontPaths;
-		fontPaths.reserve(files.size());
-		for (const auto& file : files)
+		fontPaths.reserve(groups.size());
+		for (const auto& group : groups)
 		{
-			fontPaths.push_back(file.m_path);
+			fontPaths.push_back(snapshot.m_files[group.front()].m_path);
 		}
 
 		auto db = FontIndexCore::BuildFontDatabase(fontPaths, workerCount, isCancelled);
 		ThrowIfCancelled(isCancelled);
 		WriteFontDatabaseAtomically(task.m_indexPath, db);
-
-		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
 		ThrowIfCancelled(isCancelled);
 		FontIndexCore::WriteDirectorySnapshot(task.m_snapshotPath, snapshot);
 		ThrowIfCancelled(isCancelled);
-		return fontPaths.size();
+		return snapshot.m_files.size();
 	}
 
 	ManagedIndexBuilder::ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount)

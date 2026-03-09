@@ -57,6 +57,19 @@ namespace FontIndexCore
 			}
 		};
 
+		XXH128Digest ToDigest(const Hash128Value& hash)
+		{
+			return { XXH128_hash_t{ hash.m_low64, hash.m_high64 } };
+		}
+
+		Hash128Value ToHashValue(const XXH128Digest& digest)
+		{
+			Hash128Value value;
+			value.m_low64 = digest.m_value.low64;
+			value.m_high64 = digest.m_value.high64;
+			return value;
+		}
+
 		class XXH3Context
 		{
 		private:
@@ -113,14 +126,15 @@ namespace FontIndexCore
 			}
 		};
 
-		struct FileRecord
+		struct SnapshotRecord
 		{
-			const FontSourceFile* m_source = nullptr;
+			size_t m_index = 0;
+			const DirectorySnapshotEntry* m_entry = nullptr;
 			XXH128Digest m_digest{};
 			bool m_hashValid = false;
 		};
 
-		bool FileRecordLess(const FileRecord* lhs, const FileRecord* rhs)
+		bool SnapshotRecordLess(const SnapshotRecord* lhs, const SnapshotRecord* rhs)
 		{
 			if (lhs->m_digest < rhs->m_digest)
 			{
@@ -130,7 +144,7 @@ namespace FontIndexCore
 			{
 				return false;
 			}
-			return lhs->m_source->m_path < rhs->m_source->m_path;
+			return lhs->m_entry->m_path < rhs->m_entry->m_path;
 		}
 
 		bool AreFilesByteEqual(const std::filesystem::path& lhs, const std::filesystem::path& rhs, uint64_t expectedSize)
@@ -190,39 +204,35 @@ namespace FontIndexCore
 		}
 	}
 
-	DeduplicateResult DeduplicateFiles(
-		const std::vector<FontSourceFile>& input,
+	void PopulateMissingContentHashes(
+		DirectorySnapshot& snapshot,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
 		std::atomic<size_t>* progress,
 		const FileOperationErrorCallback& onError)
 	{
-		DeduplicateResult result;
-		std::unordered_map<uint64_t, std::vector<FileRecord>> groups;
-		groups.reserve(input.size());
+		std::unordered_map<uint64_t, std::vector<size_t>> sizeGroups;
+		sizeGroups.reserve(snapshot.m_files.size());
 
-		for (const auto& file : input)
+		for (size_t i = 0; i < snapshot.m_files.size(); ++i)
 		{
-			groups[file.m_fileSize].push_back({ &file });
+			sizeGroups[snapshot.m_files[i].m_fileSize].push_back(i);
 		}
 
-		std::vector<FileRecord*> pendingHashes;
-		pendingHashes.reserve(input.size());
-		for (auto& [fileSize, records] : groups)
+		std::vector<size_t> pendingHashes;
+		pendingHashes.reserve(snapshot.m_files.size());
+		for (const auto& [fileSize, indices] : sizeGroups)
 		{
-			if (records.size() == 1)
+			if (indices.size() <= 1)
 			{
-				result.m_uniqueFiles.push_back(records.front().m_source->m_path);
-				if (progress)
-				{
-					++(*progress);
-				}
+				continue;
 			}
-			else
+
+			for (auto index : indices)
 			{
-				for (auto& record : records)
+				if (!snapshot.m_files[index].m_hasContentHash)
 				{
-					pendingHashes.push_back(&record);
+					pendingHashes.push_back(index);
 				}
 			}
 		}
@@ -242,27 +252,28 @@ namespace FontIndexCore
 				{
 					ThrowIfCancelled(isCancelled);
 
-					FileRecord* record = nullptr;
+					size_t recordIndex = 0;
 					{
 						std::lock_guard lg(queueLock);
 						if (nextPendingIndex == pendingHashes.size())
 						{
 							return;
 						}
-						record = pendingHashes[nextPendingIndex];
+						recordIndex = pendingHashes[nextPendingIndex];
 						++nextPendingIndex;
 					}
 
+					auto& entry = snapshot.m_files[recordIndex];
 					try
 					{
-						record->m_digest = context.Calculate(record->m_source->m_path.c_str());
-						record->m_hashValid = true;
+						entry.m_contentHash = ToHashValue(context.Calculate(entry.m_path.c_str()));
+						entry.m_hasContentHash = true;
 					}
 					catch (const std::exception& e)
 					{
 						if (onError)
 						{
-							onError(record->m_source->m_path, e.what());
+							onError(entry.m_path, e.what());
 						}
 					}
 
@@ -283,22 +294,52 @@ namespace FontIndexCore
 		}
 
 		ThrowIfCancelled(isCancelled);
+	}
 
-		for (auto& [fileSize, records] : groups)
+	std::vector<std::vector<size_t>> GroupEquivalentFiles(
+		const DirectorySnapshot& snapshot,
+		const std::function<bool()>& isCancelled,
+		const FileOperationErrorCallback& onError)
+	{
+		std::unordered_map<uint64_t, std::vector<SnapshotRecord>> sizeGroups;
+		sizeGroups.reserve(snapshot.m_files.size());
+		for (size_t i = 0; i < snapshot.m_files.size(); ++i)
 		{
-			if (records.size() <= 1)
+			sizeGroups[snapshot.m_files[i].m_fileSize].push_back({ i, &snapshot.m_files[i] });
+		}
+
+		std::vector<std::vector<size_t>> result;
+		result.reserve(snapshot.m_files.size());
+		for (auto& [fileSize, records] : sizeGroups)
+		{
+			ThrowIfCancelled(isCancelled);
+
+			if (records.size() == 1)
 			{
+				result.push_back({ records.front().m_index });
 				continue;
 			}
 
-			std::vector<FileRecord*> validRecords;
+			std::vector<size_t> invalidHashEntries;
+			std::vector<SnapshotRecord*> validRecords;
 			validRecords.reserve(records.size());
 			for (auto& record : records)
 			{
-				if (record.m_hashValid)
+				if (record.m_entry->m_hasContentHash)
 				{
+					record.m_digest = ToDigest(record.m_entry->m_contentHash);
+					record.m_hashValid = true;
 					validRecords.push_back(&record);
 				}
+				else
+				{
+					invalidHashEntries.push_back(record.m_index);
+				}
+			}
+
+			for (auto index : invalidHashEntries)
+			{
+				result.push_back({ index });
 			}
 
 			if (validRecords.empty())
@@ -306,7 +347,7 @@ namespace FontIndexCore
 				continue;
 			}
 
-			std::sort(validRecords.begin(), validRecords.end(), FileRecordLess);
+			std::sort(validRecords.begin(), validRecords.end(), SnapshotRecordLess);
 
 			size_t groupBegin = 0;
 			while (groupBegin < validRecords.size())
@@ -318,7 +359,7 @@ namespace FontIndexCore
 					++groupEnd;
 				}
 
-				std::vector<std::vector<FileRecord*>> confirmedGroups;
+				std::vector<std::vector<SnapshotRecord*>> confirmedGroups;
 				for (size_t i = groupBegin; i < groupEnd; ++i)
 				{
 					auto* candidate = validRecords[i];
@@ -328,8 +369,8 @@ namespace FontIndexCore
 						try
 						{
 							if (AreFilesByteEqual(
-								confirmedGroup.front()->m_source->m_path,
-								candidate->m_source->m_path,
+								confirmedGroup.front()->m_entry->m_path,
+								candidate->m_entry->m_path,
 								fileSize))
 							{
 								confirmedGroup.push_back(candidate);
@@ -341,7 +382,7 @@ namespace FontIndexCore
 						{
 							if (onError)
 							{
-								onError(candidate->m_source->m_path, e.what());
+								onError(candidate->m_entry->m_path, e.what());
 							}
 						}
 					}
@@ -354,26 +395,81 @@ namespace FontIndexCore
 
 				for (auto& confirmedGroup : confirmedGroups)
 				{
-					std::sort(confirmedGroup.begin(), confirmedGroup.end(), [](const FileRecord* lhs, const FileRecord* rhs)
+					std::sort(confirmedGroup.begin(), confirmedGroup.end(), [](const SnapshotRecord* lhs, const SnapshotRecord* rhs)
 					{
-						return lhs->m_source->m_path < rhs->m_source->m_path;
+						return lhs->m_entry->m_path < rhs->m_entry->m_path;
 					});
 
-					result.m_uniqueFiles.push_back(confirmedGroup.front()->m_source->m_path);
-					if (confirmedGroup.size() > 1)
+					std::vector<size_t> group;
+					group.reserve(confirmedGroup.size());
+					for (const auto* record : confirmedGroup)
 					{
-						DeduplicateResult::DuplicateGroup duplicateGroup;
-						duplicateGroup.m_keepFile = confirmedGroup.front()->m_source->m_path;
-						for (size_t i = 1; i < confirmedGroup.size(); ++i)
-						{
-							duplicateGroup.m_duplicateFiles.push_back(confirmedGroup[i]->m_source->m_path);
-						}
-						result.m_duplicateGroups.push_back(std::move(duplicateGroup));
+						group.push_back(record->m_index);
 					}
+					result.push_back(std::move(group));
 				}
 
 				groupBegin = groupEnd;
 			}
+		}
+
+		std::sort(result.begin(), result.end(), [&](const std::vector<size_t>& lhs, const std::vector<size_t>& rhs)
+		{
+			return snapshot.m_files[lhs.front()].m_path < snapshot.m_files[rhs.front()].m_path;
+		});
+		return result;
+	}
+
+	DeduplicateResult DeduplicateFiles(
+		const std::vector<FontSourceFile>& input,
+		size_t workerCount,
+		const std::function<bool()>& isCancelled,
+		std::atomic<size_t>* progress,
+		const FileOperationErrorCallback& onError)
+	{
+		DeduplicateResult result;
+		DirectorySnapshot snapshot;
+		snapshot.m_files.reserve(input.size());
+
+		std::unordered_map<uint64_t, size_t> sizeGroupCounts;
+		sizeGroupCounts.reserve(input.size());
+		for (const auto& file : input)
+		{
+			++sizeGroupCounts[file.m_fileSize];
+			DirectorySnapshotEntry entry;
+			entry.m_path = file.m_path;
+			entry.m_fileSize = file.m_fileSize;
+			snapshot.m_files.push_back(std::move(entry));
+		}
+
+		if (progress)
+		{
+			for (const auto& entry : snapshot.m_files)
+			{
+				if (sizeGroupCounts[entry.m_fileSize] == 1)
+				{
+					++(*progress);
+				}
+			}
+		}
+
+		PopulateMissingContentHashes(snapshot, workerCount, isCancelled, progress, onError);
+		auto groups = GroupEquivalentFiles(snapshot, isCancelled, onError);
+		for (const auto& group : groups)
+		{
+			result.m_uniqueFiles.push_back(snapshot.m_files[group.front()].m_path);
+			if (group.size() <= 1)
+			{
+				continue;
+			}
+
+			DeduplicateResult::DuplicateGroup duplicateGroup;
+			duplicateGroup.m_keepFile = snapshot.m_files[group.front()].m_path;
+			for (size_t i = 1; i < group.size(); ++i)
+			{
+				duplicateGroup.m_duplicateFiles.push_back(snapshot.m_files[group[i]].m_path);
+			}
+			result.m_duplicateGroups.push_back(std::move(duplicateGroup));
 		}
 
 		return result;

@@ -4,12 +4,14 @@
 
 #include "Common.h"
 #include "ToastNotifier.h"
+#include "PersistantData.h"
 #include "../FontIndexCore/FontIndexCore.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include <wil/resource.h>
 
@@ -40,6 +42,30 @@ namespace sfh
 			}
 		}
 
+		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
+		{
+			if (isCancelled && isCancelled())
+			{
+				throw std::runtime_error("Operation cancelled");
+			}
+		}
+
+		void WriteFontDatabaseAtomically(const std::filesystem::path& path, const FontDatabase& db)
+		{
+			const auto parent = path.parent_path();
+			if (!parent.empty())
+			{
+				std::filesystem::create_directories(parent);
+			}
+
+			const auto tempPath = path.wstring() + L".tmp";
+			FontDatabase::WriteToFile(tempPath, db);
+			THROW_LAST_ERROR_IF(!MoveFileExW(
+				tempPath.c_str(),
+				path.c_str(),
+				MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
+		}
+
 		bool AreSnapshotsEqual(
 			const FontIndexCore::DirectorySnapshot& lhs,
 			const FontIndexCore::DirectorySnapshot& rhs)
@@ -64,6 +90,25 @@ namespace sfh
 				}
 			}
 			return true;
+		}
+
+		bool HasSameMetadata(
+			const FontIndexCore::DirectorySnapshotEntry& lhs,
+			const FontIndexCore::DirectorySnapshotEntry& rhs)
+		{
+			return lhs.m_path == rhs.m_path
+				&& lhs.m_fileSize == rhs.m_fileSize
+				&& lhs.m_lastWriteTime == rhs.m_lastWriteTime;
+		}
+
+		std::unordered_set<std::wstring> ExtractIndexedPaths(const FontDatabase& db)
+		{
+			std::unordered_set<std::wstring> paths;
+			for (const auto& font : db.m_fonts)
+			{
+				paths.insert(font.m_path);
+			}
+			return paths;
 		}
 	}
 
@@ -91,6 +136,10 @@ namespace sfh
 
 		FontIndexCore::DirectorySnapshot m_lastSnapshot;
 		bool m_hasLastSnapshot = false;
+
+		FontDatabase m_database;
+		bool m_hasDatabase = false;
+		std::unordered_set<std::wstring> m_indexedPaths;
 
 	public:
 		Implementation(IDaemon* daemon, Options options)
@@ -224,29 +273,232 @@ namespace sfh
 			}
 		}
 
-		void RunRebuild(
+		void ApplyCachedHashes(
+			const FontIndexCore::DirectorySnapshot& oldSnapshot,
+			FontIndexCore::DirectorySnapshot& newSnapshot) const
+		{
+			std::unordered_map<std::wstring, const FontIndexCore::DirectorySnapshotEntry*> oldEntries;
+			oldEntries.reserve(oldSnapshot.m_files.size());
+			for (const auto& entry : oldSnapshot.m_files)
+			{
+				oldEntries.emplace(entry.m_path.wstring(), &entry);
+			}
+
+			for (auto& entry : newSnapshot.m_files)
+			{
+				const auto oldEntry = oldEntries.find(entry.m_path.wstring());
+				if (oldEntry == oldEntries.end())
+				{
+					continue;
+				}
+				if (!HasSameMetadata(*oldEntry->second, entry) || !oldEntry->second->m_hasContentHash)
+				{
+					continue;
+				}
+				entry.m_hasContentHash = true;
+				entry.m_contentHash = oldEntry->second->m_contentHash;
+			}
+		}
+
+		void EnsureLoadedDatabase()
+		{
+			if (m_hasDatabase)
+			{
+				return;
+			}
+
+			std::error_code ec;
+			if (!std::filesystem::exists(m_task.m_indexPath, ec) || ec)
+			{
+				m_database = {};
+				m_indexedPaths.clear();
+				m_hasDatabase = true;
+				return;
+			}
+
+			auto db = FontDatabase::ReadFromFile(m_task.m_indexPath.wstring());
+			m_database = std::move(*db);
+			m_indexedPaths = ExtractIndexedPaths(m_database);
+			m_hasDatabase = true;
+		}
+
+		std::vector<std::vector<size_t>> BuildContentGroups(
+			FontIndexCore::DirectorySnapshot& snapshot,
+			const std::stop_token& stopToken)
+		{
+			auto isCancelled = [&]()
+			{
+				return stopToken.stop_requested();
+			};
+
+			std::vector<std::string> failures;
+			FontIndexCore::PopulateMissingContentHashes(
+				snapshot,
+				m_workerCount,
+				isCancelled,
+				nullptr,
+				[&](const std::filesystem::path& path, const std::string& errorMessage)
+				{
+					failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+				});
+			auto groups = FontIndexCore::GroupEquivalentFiles(
+				snapshot,
+				isCancelled,
+				[&](const std::filesystem::path& path, const std::string& errorMessage)
+				{
+					failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+				});
+			if (!failures.empty())
+			{
+				throw std::runtime_error(failures.front());
+			}
+			return groups;
+		}
+
+		void RunIncrementalSync(
 			const std::stop_token& stopToken,
-			const FontIndexCore::DirectorySnapshot& newSnapshot)
+			FontIndexCore::DirectorySnapshot newSnapshot)
 		{
 			const auto indexName = GetDisplayName(m_task.m_indexPath);
+			auto isCancelled = [&]()
+			{
+				return stopToken.stop_requested();
+			};
+
 			try
 			{
-				auto isCancelled = [&]()
+				if (m_hasLastSnapshot)
 				{
-					return stopToken.stop_requested();
-				};
-
-				const auto fontFileCount = BuildManagedIndex(m_task, m_workerCount, isCancelled);
-				if (stopToken.stop_requested())
-				{
-					return;
+					ApplyCachedHashes(m_lastSnapshot, newSnapshot);
 				}
 
-				m_lastSnapshot = newSnapshot;
+				const auto groups = BuildContentGroups(newSnapshot, stopToken);
+				EnsureLoadedDatabase();
+				ThrowIfCancelled(isCancelled);
+
+				std::unordered_map<std::wstring, const FontIndexCore::DirectorySnapshotEntry*> oldEntries;
+				oldEntries.reserve(m_lastSnapshot.m_files.size());
+				if (m_hasLastSnapshot)
+				{
+					for (const auto& entry : m_lastSnapshot.m_files)
+					{
+						oldEntries.emplace(entry.m_path.wstring(), &entry);
+					}
+				}
+
+				std::unordered_set<std::wstring> currentPaths;
+				currentPaths.reserve(newSnapshot.m_files.size());
+				std::unordered_set<std::wstring> changedPaths;
+				changedPaths.reserve(newSnapshot.m_files.size());
+				size_t addedCount = 0;
+				size_t modifiedCount = 0;
+				for (const auto& entry : newSnapshot.m_files)
+				{
+					const auto key = entry.m_path.wstring();
+					currentPaths.insert(key);
+					const auto oldEntry = oldEntries.find(key);
+					if (oldEntry == oldEntries.end())
+					{
+						changedPaths.insert(key);
+						++addedCount;
+					}
+					else if (!HasSameMetadata(*oldEntry->second, entry))
+					{
+						changedPaths.insert(key);
+						++modifiedCount;
+					}
+				}
+
+				std::unordered_set<std::wstring> removedPaths;
+				removedPaths.reserve(oldEntries.size());
+				if (m_hasLastSnapshot)
+				{
+					for (const auto& [path, entry] : oldEntries)
+					{
+						if (!currentPaths.contains(path))
+						{
+							removedPaths.insert(path);
+						}
+					}
+				}
+
+				std::unordered_set<std::wstring> newCanonicalPaths;
+				newCanonicalPaths.reserve(groups.size());
+				std::vector<std::filesystem::path> pathsToAnalyze;
+				pathsToAnalyze.reserve(groups.size());
+				for (const auto& group : groups)
+				{
+					const auto& canonicalPath = newSnapshot.m_files[group.front()].m_path;
+					const auto key = canonicalPath.wstring();
+					newCanonicalPaths.insert(key);
+					if (changedPaths.contains(key) || !m_indexedPaths.contains(key))
+					{
+						pathsToAnalyze.push_back(canonicalPath);
+					}
+				}
+
+				std::unordered_set<std::wstring> pathsToRemove = removedPaths;
+				for (const auto& path : changedPaths)
+				{
+					pathsToRemove.insert(path);
+				}
+				for (const auto& path : m_indexedPaths)
+				{
+					if (!newCanonicalPaths.contains(path))
+					{
+						pathsToRemove.insert(path);
+					}
+				}
+
+				if (!pathsToRemove.empty())
+				{
+					std::erase_if(m_database.m_fonts, [&](const FontDatabase::FontFaceElement& font)
+					{
+						return pathsToRemove.contains(font.m_path);
+					});
+				}
+
+				if (!pathsToAnalyze.empty())
+				{
+					std::vector<std::string> analyzeFailures;
+					auto analyzed = FontIndexCore::BuildFontDatabase(
+						pathsToAnalyze,
+						m_workerCount,
+						isCancelled,
+						nullptr,
+						[&](const std::filesystem::path& path, const std::string& errorMessage)
+						{
+							analyzeFailures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+						});
+					if (!analyzeFailures.empty())
+					{
+						throw std::runtime_error(analyzeFailures.front());
+					}
+
+					m_database.m_fonts.insert(
+						m_database.m_fonts.end(),
+						std::make_move_iterator(analyzed.m_fonts.begin()),
+						std::make_move_iterator(analyzed.m_fonts.end()));
+				}
+
+				ThrowIfCancelled(isCancelled);
+				WriteFontDatabaseAtomically(m_task.m_indexPath, m_database);
+				ThrowIfCancelled(isCancelled);
+				FontIndexCore::WriteDirectorySnapshot(m_task.m_snapshotPath, newSnapshot);
+				ThrowIfCancelled(isCancelled);
+
+				m_lastSnapshot = std::move(newSnapshot);
 				m_hasLastSnapshot = true;
+				m_indexedPaths = std::move(newCanonicalPaths);
+				m_hasDatabase = true;
+
 				TryShowToast(
 					L"Subtitle Font Helper",
-					L"索引同步完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
+					L"索引同步完成：" + indexName
+					+ L"（新增 " + std::to_wstring(addedCount)
+					+ L"，删除 " + std::to_wstring(removedPaths.size())
+					+ L"，修改 " + std::to_wstring(modifiedCount)
+					+ L"）");
 				m_daemon->NotifyManagedIndexBuilt();
 			}
 			catch (const std::exception& e)
@@ -263,6 +515,13 @@ namespace sfh
 		void InitializeSnapshotState(const std::stop_token& stopToken)
 		{
 			auto currentSnapshot = CaptureSnapshot(stopToken);
+			FontIndexCore::DirectorySnapshot persistedSnapshot;
+			const bool hasPersistedSnapshot = TryReadPersistedSnapshot(persistedSnapshot);
+			if (hasPersistedSnapshot)
+			{
+				ApplyCachedHashes(persistedSnapshot, currentSnapshot);
+			}
+
 			if (m_skipInitialSync)
 			{
 				m_lastSnapshot = std::move(currentSnapshot);
@@ -270,19 +529,18 @@ namespace sfh
 				return;
 			}
 
-			FontIndexCore::DirectorySnapshot persistedSnapshot;
-			const bool hasPersistedSnapshot = TryReadPersistedSnapshot(persistedSnapshot);
 			if (hasPersistedSnapshot && AreSnapshotsEqual(persistedSnapshot, currentSnapshot))
 			{
+				EnsureLoadedDatabase();
 				m_lastSnapshot = std::move(currentSnapshot);
 				m_hasLastSnapshot = true;
 				return;
 			}
 
-			RunRebuild(stopToken, currentSnapshot);
+			RunIncrementalSync(stopToken, std::move(currentSnapshot));
 			if (!m_hasLastSnapshot)
 			{
-				m_lastSnapshot = std::move(currentSnapshot);
+				m_lastSnapshot = CaptureSnapshot(stopToken);
 				m_hasLastSnapshot = true;
 			}
 		}
@@ -332,9 +590,13 @@ namespace sfh
 					if (pendingSync)
 					{
 						auto newSnapshot = CaptureSnapshot(stopToken);
+						if (m_hasLastSnapshot)
+						{
+							ApplyCachedHashes(m_lastSnapshot, newSnapshot);
+						}
 						if (!m_hasLastSnapshot || !AreSnapshotsEqual(m_lastSnapshot, newSnapshot))
 						{
-							RunRebuild(stopToken, newSnapshot);
+							RunIncrementalSync(stopToken, std::move(newSnapshot));
 						}
 					}
 					pendingSync = false;
@@ -343,7 +605,7 @@ namespace sfh
 				}
 				if (waitResult >= WAIT_OBJECT_0 + 1 && waitResult < WAIT_OBJECT_0 + waitHandles.size())
 				{
-					auto index = waitResult - WAIT_OBJECT_0 - 1;
+					const auto index = waitResult - WAIT_OBJECT_0 - 1;
 					DWORD transferredBytes = 0;
 					if (!GetOverlappedResult(
 						m_folderWatches[index].m_handle.get(),

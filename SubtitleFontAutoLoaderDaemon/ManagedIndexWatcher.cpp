@@ -110,6 +110,29 @@ namespace sfh
 			}
 			return paths;
 		}
+
+		size_t SelectCanonicalEntryIndex(
+			const std::vector<size_t>& group,
+			const FontIndexCore::DirectorySnapshot& snapshot,
+			const std::unordered_set<std::wstring>& indexedPaths,
+			const std::unordered_map<std::wstring, const FontIndexCore::DirectorySnapshotEntry*>& oldEntries)
+		{
+			for (const auto index : group)
+			{
+				const auto& entry = snapshot.m_files[index];
+				const auto key = entry.m_path.wstring();
+				const auto oldEntry = oldEntries.find(key);
+				if (!indexedPaths.contains(key) || oldEntry == oldEntries.end())
+				{
+					continue;
+				}
+				if (HasSameMetadata(*oldEntry->second, entry))
+				{
+					return index;
+				}
+			}
+			return group.front();
+		}
 	}
 
 	class ManagedIndexWatcher::Implementation
@@ -251,6 +274,7 @@ namespace sfh
 			{
 				return stopToken.stop_requested();
 			};
+			ValidateManagedIndexSourceFolders(m_task);
 			return FontIndexCore::CaptureDirectorySnapshot(m_task.m_sourceFolders, isCancelled);
 		}
 
@@ -428,7 +452,12 @@ namespace sfh
 				pathsToAnalyze.reserve(groups.size());
 				for (const auto& group : groups)
 				{
-					const auto& canonicalPath = newSnapshot.m_files[group.front()].m_path;
+					const auto canonicalIndex = SelectCanonicalEntryIndex(
+						group,
+						newSnapshot,
+						m_indexedPaths,
+						oldEntries);
+					const auto& canonicalPath = newSnapshot.m_files[canonicalIndex].m_path;
 					const auto key = canonicalPath.wstring();
 					newCanonicalPaths.insert(key);
 					if (changedPaths.contains(key) || !m_indexedPaths.contains(key))

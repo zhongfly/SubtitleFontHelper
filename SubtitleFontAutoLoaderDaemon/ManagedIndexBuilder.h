@@ -34,4 +34,5 @@ namespace sfh
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled = {});
+	void ValidateManagedIndexSourceFolders(const ManagedIndexBuilder::Task& task);
 }

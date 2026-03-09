@@ -57,14 +57,52 @@ namespace sfh
 		}
 	}
 
+	void ValidateManagedIndexSourceFolders(const ManagedIndexBuilder::Task& task)
+	{
+		if (task.m_sourceFolders.empty())
+		{
+			throw std::runtime_error("managed index source_folders is empty");
+		}
+
+		for (const auto& sourceFolder : task.m_sourceFolders)
+		{
+			const auto attributes = GetFileAttributesW(sourceFolder.c_str());
+			if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+			{
+				throw std::runtime_error(
+					"source folder is not accessible: " + WideToUtf8String(sourceFolder.wstring()));
+			}
+		}
+	}
+
 	size_t BuildManagedIndex(
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled)
 	{
+		ValidateManagedIndexSourceFolders(task);
 		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
-		FontIndexCore::PopulateMissingContentHashes(snapshot, workerCount, isCancelled);
-		auto groups = FontIndexCore::GroupEquivalentFiles(snapshot, isCancelled);
+		std::vector<std::string> failures;
+		FontIndexCore::PopulateMissingContentHashes(
+			snapshot,
+			workerCount,
+			isCancelled,
+			nullptr,
+			[&](const std::filesystem::path& path, const std::string& errorMessage)
+			{
+				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+			});
+		auto groups = FontIndexCore::GroupEquivalentFiles(
+			snapshot,
+			isCancelled,
+			[&](const std::filesystem::path& path, const std::string& errorMessage)
+			{
+				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+			});
+		if (!failures.empty())
+		{
+			throw std::runtime_error(failures.front());
+		}
 
 		std::vector<std::filesystem::path> fontPaths;
 		fontPaths.reserve(groups.size());
@@ -73,7 +111,19 @@ namespace sfh
 			fontPaths.push_back(snapshot.m_files[group.front()].m_path);
 		}
 
-		auto db = FontIndexCore::BuildFontDatabase(fontPaths, workerCount, isCancelled);
+		auto db = FontIndexCore::BuildFontDatabase(
+			fontPaths,
+			workerCount,
+			isCancelled,
+			nullptr,
+			[&](const std::filesystem::path& path, const std::string& errorMessage)
+			{
+				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+			});
+		if (!failures.empty())
+		{
+			throw std::runtime_error(failures.front());
+		}
 		ThrowIfCancelled(isCancelled);
 		WriteFontDatabaseAtomically(task.m_indexPath, db);
 		ThrowIfCancelled(isCancelled);

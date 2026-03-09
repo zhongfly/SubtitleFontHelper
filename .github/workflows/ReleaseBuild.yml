@@ -2,9 +2,8 @@ name: ReleaseBuild
 
 on:
   push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+    tags:
+      - '*'
 
 env:
   SOLUTION_FILE_PATH: .
@@ -18,7 +17,18 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-2022
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86
+            build_dir: Win32
+            artifact_name: Build-Win32-Release
+          - platform: x64
+            build_dir: x64
+            artifact_name: Build-x64-Release
 
     steps:
     - uses: actions/checkout@v6
@@ -36,7 +46,7 @@ jobs:
       id: cache
       with:
         path: vcpkg_binary_cache\
-        key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-binarycache-${{ hashFiles('vcpkg.json') }}
+        key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-${{ matrix.platform }}-binarycache-${{ hashFiles('vcpkg.json') }}
 
     - name: Create vcpkg binary cache directory
       shell: pwsh
@@ -52,13 +62,35 @@ jobs:
       run: |
         & "$env:VCPKG_ROOT\vcpkg.exe" integrate install
 
-    - name: Build x86
+    - name: Build ${{ matrix.platform }}
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=x86 ${{env.SOLUTION_FILE_PATH}}
-      
-    - name: Build x64
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=x64 ${{env.SOLUTION_FILE_PATH}}
+      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} ${{env.SOLUTION_FILE_PATH}}
+
+    - name: Upload build output
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: Build\${{ matrix.build_dir }}\${{ env.BUILD_CONFIGURATION }}\
+
+  package:
+    name: Package Release build
+    runs-on: windows-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download x86 build output
+      uses: actions/download-artifact@v6
+      with:
+        name: Build-Win32-Release
+        path: Build\Win32\${{ env.BUILD_CONFIGURATION }}\
+
+    - name: Download x64 build output
+      uses: actions/download-artifact@v6
+      with:
+        name: Build-x64-Release
+        path: Build\x64\${{ env.BUILD_CONFIGURATION }}\
 
     - name: Copy files
       working-directory: ${{env.GITHUB_WORKSPACE}}

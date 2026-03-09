@@ -122,7 +122,8 @@ namespace sfh
 			Init = 0,
 			Exception,
 			Exit,
-			Reload
+			Reload,
+			ManagedIndexBuilt
 		};
 
 		struct Message
@@ -140,6 +141,12 @@ namespace sfh
 
 		struct Service
 		{
+			struct IndexSlot
+			{
+				std::filesystem::path m_path;
+				bool m_isManaged = false;
+			};
+
 			std::unique_ptr<SystemTray> m_systemTray;
 			std::unique_ptr<QueryService> m_queryService;
 			std::unique_ptr<RpcServer> m_rpcServer;
@@ -147,6 +154,7 @@ namespace sfh
 			std::unique_ptr<Prefetch> m_prefetch;
 			std::unique_ptr<ConfigWatcher> m_configWatcher;
 			std::vector<std::unique_ptr<ManagedIndexBuilder>> m_managedIndexBuilders;
+			std::vector<IndexSlot> m_indexSlots;
 		};
 
 		std::unique_ptr<Service> m_service;
@@ -169,6 +177,13 @@ namespace sfh
 		{
 			std::unique_lock ul(m_queueLock);
 			m_msgQueue.emplace(MessageType::Reload, std::nullopt);
+			m_queueCV.notify_one();
+		}
+
+		void NotifyManagedIndexBuilt() override
+		{
+			std::unique_lock ul(m_queueLock);
+			m_msgQueue.emplace(MessageType::ManagedIndexBuilt, std::nullopt);
 			m_queueCV.notify_one();
 		}
 
@@ -195,6 +210,9 @@ namespace sfh
 				case MessageType::Reload:
 					OnInit(cmdline);
 					break;
+				case MessageType::ManagedIndexBuilt:
+					OnManagedIndexBuilt();
+					break;
 				default:
 					MarkUnreachable();
 				}
@@ -211,6 +229,36 @@ namespace sfh
 		}
 
 	private:
+		std::vector<std::unique_ptr<FontDatabase>> LoadAvailableIndexDatabases(const Service& service)
+		{
+			std::vector<std::unique_ptr<FontDatabase>> dbs;
+			dbs.reserve(service.m_indexSlots.size());
+			for (const auto& slot : service.m_indexSlots)
+			{
+				if (slot.m_isManaged)
+				{
+					std::error_code ec;
+					if (!std::filesystem::exists(slot.m_path, ec) || ec)
+						continue;
+				}
+
+				dbs.emplace_back(ReadWithRetry([&]()
+				{
+					return FontDatabase::ReadFromFile(slot.m_path);
+				}));
+			}
+			return dbs;
+		}
+
+		void OnManagedIndexBuilt()
+		{
+			if (m_service == nullptr || m_service->m_queryService == nullptr)
+				return;
+
+			auto dbs = LoadAvailableIndexDatabases(*m_service);
+			m_service->m_queryService->Load(std::move(dbs));
+		}
+
 		void OnInit(const std::vector<std::wstring>& cmdline)
 		{
 			{
@@ -237,7 +285,9 @@ namespace sfh
 			for (auto& indexFile : cfg->m_indexFile)
 			{
 				auto indexPath = std::filesystem::absolute(indexFile.m_path).lexically_normal();
-				if (IsManagedIndex(indexFile))
+				const bool isManagedIndex = IsManagedIndex(indexFile);
+				newService->m_indexSlots.push_back({ indexPath, isManagedIndex });
+				if (isManagedIndex)
 				{
 					std::error_code ec;
 					if (!std::filesystem::exists(indexPath, ec) || ec)
@@ -250,7 +300,9 @@ namespace sfh
 						continue;
 					}
 				}
-				watchFiles.emplace_back(indexPath);
+
+				if (!isManagedIndex)
+					watchFiles.emplace_back(indexPath);
 				dbs.emplace_back(ReadWithRetry([&]()
 				{
 					return FontDatabase::ReadFromFile(indexPath);

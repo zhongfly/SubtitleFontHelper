@@ -24,6 +24,26 @@ namespace sfh
 {
 	bool g_debugOutputEnabled = false;
 
+	namespace
+	{
+		std::filesystem::path ResolveConfigPath(const std::filesystem::path& directory)
+		{
+			std::error_code ec;
+			auto tomlPath = directory / L"SubtitleFontHelper.toml";
+			if (std::filesystem::exists(tomlPath, ec) && !ec)
+				return tomlPath;
+			return directory / L"SubtitleFontHelper.xml";
+		}
+
+		void AppendConfigWatchFiles(
+			std::vector<std::filesystem::path>& watchFiles,
+			const std::filesystem::path& directory)
+		{
+			watchFiles.emplace_back(directory / L"SubtitleFontHelper.toml");
+			watchFiles.emplace_back(directory / L"SubtitleFontHelper.xml");
+		}
+	}
+
 	class SingleInstanceLock
 	{
 	private:
@@ -173,7 +193,7 @@ namespace sfh
 			auto newService = std::make_unique<Service>();
 			std::filesystem::path selfPath{wil::GetModuleFileNameW<wil::unique_hlocal_string>().get()};
 			selfPath.remove_filename();
-			auto configPath = selfPath / L"SubtitleFontHelper.xml";
+			auto configPath = ResolveConfigPath(selfPath);
 			auto lruCachePath = selfPath / L"lruCache.txt";
 			auto cfg = ReadWithRetry([&]()
 			{
@@ -183,7 +203,7 @@ namespace sfh
 			newService->m_systemTray = std::make_unique<SystemTray>(this);
 			std::vector<std::unique_ptr<FontDatabase>> dbs;
 			std::vector<std::filesystem::path> watchFiles;
-			watchFiles.emplace_back(configPath);
+			AppendConfigWatchFiles(watchFiles, selfPath);
 			for (auto& indexFile : cfg->m_indexFile)
 			{
 				auto indexPath = std::filesystem::absolute(indexFile.m_path).lexically_normal();

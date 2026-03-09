@@ -14,7 +14,7 @@
 额外的命令行选项请不带参数执行以查看。
 
 ### SubtitleFontAutoLoaderDaemon.exe
-主程序。运行后会从exe所在目录下的SubtitleFontHelper.xml读取配置文件。程序没有界面，但是会创建一个托盘图标，以方便控制。
+主程序。运行后会优先从 exe 所在目录读取 `SubtitleFontHelper.toml`；`SubtitleFontHelper.xml` 仅作为兼容旧版本配置的回退格式。程序没有界面，但是会创建一个托盘图标，以方便控制。
 日志将会写入程序目录下的`SubtitleFontHelper.log`，并按大小自动轮转为`SubtitleFontHelper.log.1`到`SubtitleFontHelper.log.5`。达到约10MiB后会滚动到下一个归档文件，因此无需注册ETW或事件查看器清单。
 
 ### enableAutoStart.ps1
@@ -23,21 +23,30 @@
 ### disableAutoStart.ps1
 删除上面创建的快捷方式，以禁用自动启动。
 
-### SubtitleFontHelper.xml
-配置文件，使用UTF-8编码。样例如下所示：
+### SubtitleFontHelper.toml
+配置文件使用 UTF-8 编码。**新配置请使用** `SubtitleFontHelper.toml`。`SubtitleFontHelper.xml` 仅保留给旧版本配置兼容回退。当前 TOML 读取实现面向本项目配置场景，支持**简单子集**：正整数、字符串、字符串数组，以及 `[[index_files]]` 表。
+
+推荐的 TOML 示例：
 ```
-<?xml version="1.0" encoding="UTF-8"?>
-<ConfigFile wmiPollInterval="1000" lruSize="100">
-<IndexFile>E:\超级字体整合包 XZ\FontIndex.xml</IndexFile>
-<MonitorProcess>mpc-hc64_nvo.exe</MonitorProcess>
-<MonitorProcess>mpc-hc_nvo.exe</MonitorProcess>
-</ConfigFile>
+wmi_poll_interval = 1000
+lru_size = 100
+monitor_processes = [
+  'mpc-hc64_nvo.exe',
+  'mpc-hc_nvo.exe',
+]
+
+[[index_files]]
+path = 'E:\超级字体整合包 XZ\FontIndex.xml'
 ```
- - `wmiPollInterval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
- - `lruSize` 指定服务启动时预加载的条目最大大小。
- - `IndexFile`元素 每个元素指定了索引文件的位置，在这里列出程序所使用的索引。元素开始和结束之间的**所有**字符（包括换行等字符）将会被当作文件路径使用，若提示找不到文件请检查相关内容。
- - `MonitorProcess`元素 每个元素指定了要监视的进程的路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
- - 未被程序使用的额外属性或元素会被忽略，便于与外部工具共享同一份配置文件。
+
+ - TOML 中推荐使用 `wmi_poll_interval`、`lru_size`、`monitor_processes` 和 `[[index_files]]` / `path`。
+ - `SubtitleFontHelper.toml` 只要存在就会被优先读取；只有在该文件不存在时才会回退到 `SubtitleFontHelper.xml`。
+ - `wmiPollInterval` / `wmi_poll_interval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
+ - `lruSize` / `lru_size` 指定服务启动时预加载的条目最大大小。
+ - XML 的 `IndexFile` 元素和 TOML 的 `[[index_files]].path` 都用于指定索引文件位置。
+ - `MonitorProcess` / `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
+ - XML 仅用于兼容旧版本配置；新配置不再提供 XML 示例。
+ - XML 中未被程序使用的额外属性或元素会被忽略，便于与外部工具共享同一份配置文件；TOML 中**当前支持类型**的未知键也会被忽略。
 
 ### FontLoaderInterceptor32.dll
 ### FontLoaderInterceptor64.dll

@@ -12,7 +12,7 @@ Set-Location ReleaseBuild
 
 Copy-Item ../enableAutoStart.ps1 .
 Copy-Item ../disableAutoStart.ps1 .
-Copy-Item ../SubtitleFontHelper.example.xml .
+Copy-Item ../SubtitleFontHelper.example.toml .
 Copy-Item ../Build/Win32/$configuration/FontLoadInterceptor32.dll .
 Copy-Item ../Build/Win32/$configuration/Generated32.dll .
 Copy-Item ../Build/x64/$configuration/FontLoadInterceptor64.dll .

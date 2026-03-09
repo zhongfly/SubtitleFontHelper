@@ -5,7 +5,11 @@
 #include <stdexcept>
 #include <atomic>
 #include <cwctype>
+#include <cstdio>
+#include <filesystem>
+#include <limits>
 #include <memory>
+#include <string_view>
 #include <variant>
 
 #include <Windows.h>
@@ -42,6 +46,638 @@ namespace
 		return actualLength >= 0
 			&& static_cast<size_t>(actualLength) == wcslen(expected)
 			&& wcsncmp(actual, expected, actualLength) == 0;
+	}
+
+	std::string ReadUtf8TextFile(const std::wstring& path)
+	{
+		std::string ret;
+		wil::unique_file fp;
+		if (_wfopen_s(fp.put(), path.c_str(), L"rb"))
+			throw std::runtime_error("unable to open file");
+		if (fseek(fp.get(), 0, SEEK_END) != 0)
+			throw std::runtime_error("unable to seek file");
+		auto fileSize = ftell(fp.get());
+		if (fileSize < 0)
+			throw std::runtime_error("unable to get file size");
+		ret.resize(static_cast<size_t>(fileSize));
+		rewind(fp.get());
+		if (!ret.empty() && fread(ret.data(), sizeof(char), ret.size(), fp.get()) != ret.size())
+			throw std::runtime_error("unable to read file");
+		if (ret.size() >= 3
+			&& static_cast<unsigned char>(ret[0]) == 0xEF
+			&& static_cast<unsigned char>(ret[1]) == 0xBB
+			&& static_cast<unsigned char>(ret[2]) == 0xBF)
+		{
+			ret.erase(0, 3);
+		}
+		return ret;
+	}
+
+	std::wstring Utf8ToWideString(const std::string_view str)
+	{
+		if (str.empty())
+			return {};
+		const int length = MultiByteToWideChar(
+			CP_UTF8,
+			MB_ERR_INVALID_CHARS,
+			str.data(),
+			static_cast<int>(str.size()),
+			nullptr,
+			0);
+		if (length == 0)
+			throw std::runtime_error("invalid utf-8 string");
+
+		std::wstring ret;
+		ret.resize(length);
+		if (MultiByteToWideChar(
+			CP_UTF8,
+			MB_ERR_INVALID_CHARS,
+			str.data(),
+			static_cast<int>(str.size()),
+			ret.data(),
+			length) == 0)
+		{
+			throw std::runtime_error("invalid utf-8 string");
+		}
+		return ret;
+	}
+
+	std::string TrimAscii(std::string_view value)
+	{
+		size_t begin = 0;
+		while (begin < value.size() && (value[begin] == ' ' || value[begin] == '\t'))
+			++begin;
+		size_t end = value.size();
+		while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+			--end;
+		return std::string(value.substr(begin, end - begin));
+	}
+
+	class TomlConfigParser
+	{
+	private:
+		using TomlValue = std::variant<
+			std::wstring,
+			uint32_t,
+			bool,
+			std::vector<std::wstring>,
+			std::vector<uint32_t>,
+			std::vector<bool>>;
+
+		enum class Context
+		{
+			Root = 0,
+			IndexFile,
+			Unknown
+		};
+
+		std::string_view m_source;
+		size_t m_pos = 0;
+		size_t m_line = 1;
+		size_t m_column = 1;
+		Context m_context = Context::Root;
+		std::unique_ptr<sfh::ConfigFile> m_config = std::make_unique<sfh::ConfigFile>();
+
+	public:
+		explicit TomlConfigParser(std::string_view source)
+			: m_source(source)
+		{
+		}
+
+		std::unique_ptr<sfh::ConfigFile> Parse()
+		{
+			while (true)
+			{
+				SkipStatementTrivia();
+				if (IsEof())
+					break;
+				if (Peek() == '[')
+				{
+					ParseTableHeader();
+				}
+				else
+				{
+					ParseKeyValue();
+				}
+			}
+
+			for (const auto& indexFile : m_config->m_indexFile)
+			{
+				if (indexFile.m_path.empty())
+					ThrowError("index_files.path must not be empty");
+			}
+
+			return std::move(m_config);
+		}
+
+	private:
+		[[noreturn]] void ThrowError(const char* message) const
+		{
+			throw std::runtime_error(
+				"TOML parse error at line "
+				+ std::to_string(m_line)
+				+ ", column "
+				+ std::to_string(m_column)
+				+ ": "
+				+ message);
+		}
+
+		bool IsEof() const
+		{
+			return m_pos >= m_source.size();
+		}
+
+		char Peek(size_t offset = 0) const
+		{
+			if (m_pos + offset >= m_source.size())
+				return '\0';
+			return m_source[m_pos + offset];
+		}
+
+		static bool IsLineBreak(char ch)
+		{
+			return ch == '\r' || ch == '\n';
+		}
+
+		static bool IsSpaceOrTab(char ch)
+		{
+			return ch == ' ' || ch == '\t';
+		}
+
+		static bool IsBareKeyChar(char ch)
+		{
+			return (ch >= 'a' && ch <= 'z')
+				|| (ch >= 'A' && ch <= 'Z')
+				|| (ch >= '0' && ch <= '9')
+				|| ch == '_'
+				|| ch == '-';
+		}
+
+		void Advance()
+		{
+			if (IsEof())
+				return;
+
+			if (Peek() == '\r')
+			{
+				++m_pos;
+				if (Peek() == '\n')
+					++m_pos;
+				++m_line;
+				m_column = 1;
+				return;
+			}
+			if (Peek() == '\n')
+			{
+				++m_pos;
+				++m_line;
+				m_column = 1;
+				return;
+			}
+
+			++m_pos;
+			++m_column;
+		}
+
+		bool TryConsume(char expected)
+		{
+			if (Peek() != expected)
+				return false;
+			Advance();
+			return true;
+		}
+
+		void Expect(char expected)
+		{
+			if (!TryConsume(expected))
+				ThrowError("unexpected token");
+		}
+
+		void SkipComment()
+		{
+			if (Peek() != '#')
+				return;
+			while (!IsEof() && !IsLineBreak(Peek()))
+			{
+				Advance();
+			}
+		}
+
+		void SkipStatementTrivia()
+		{
+			while (!IsEof())
+			{
+				if (IsSpaceOrTab(Peek()) || IsLineBreak(Peek()))
+				{
+					Advance();
+					continue;
+				}
+				if (Peek() == '#')
+				{
+					SkipComment();
+					continue;
+				}
+				break;
+			}
+		}
+
+		void SkipInlineTrivia()
+		{
+			while (!IsEof() && (IsSpaceOrTab(Peek()) || Peek() == '\r'))
+			{
+				Advance();
+			}
+		}
+
+		void SkipArrayTrivia()
+		{
+			while (!IsEof())
+			{
+				if (IsSpaceOrTab(Peek()) || IsLineBreak(Peek()))
+				{
+					Advance();
+					continue;
+				}
+				if (Peek() == '#')
+				{
+					SkipComment();
+					continue;
+				}
+				break;
+			}
+		}
+
+		void FinishStatement()
+		{
+			SkipInlineTrivia();
+			if (Peek() == '#')
+				SkipComment();
+			SkipInlineTrivia();
+			if (!IsEof() && !IsLineBreak(Peek()))
+				ThrowError("expected end of line");
+		}
+
+		std::string ParseKey()
+		{
+			size_t begin = m_pos;
+			while (IsBareKeyChar(Peek()))
+			{
+				Advance();
+			}
+			if (begin == m_pos)
+				ThrowError("expected key");
+			return std::string(m_source.substr(begin, m_pos - begin));
+		}
+
+		std::string ParseTableName(bool arrayTable)
+		{
+			size_t begin = m_pos;
+			while (!IsEof())
+			{
+				if (arrayTable)
+				{
+					if (Peek() == ']' && Peek(1) == ']')
+						break;
+				}
+				else if (Peek() == ']')
+				{
+					break;
+				}
+
+				if (IsLineBreak(Peek()))
+					ThrowError("table header must be on a single line");
+				Advance();
+			}
+			if (IsEof())
+				ThrowError("unterminated table header");
+			auto name = TrimAscii(m_source.substr(begin, m_pos - begin));
+			if (name.empty())
+				ThrowError("table name must not be empty");
+			return name;
+		}
+
+		void ParseTableHeader()
+		{
+			Expect('[');
+			bool isArrayTable = TryConsume('[');
+			auto tableName = ParseTableName(isArrayTable);
+			if (isArrayTable)
+			{
+				Expect(']');
+			}
+			Expect(']');
+			FinishStatement();
+
+			if (isArrayTable && tableName == "index_files")
+			{
+				m_config->m_indexFile.emplace_back();
+				m_context = Context::IndexFile;
+				return;
+			}
+
+			m_context = Context::Unknown;
+		}
+
+		std::wstring ParseBasicString()
+		{
+			Expect('"');
+			std::string value;
+			while (!IsEof())
+			{
+				char ch = Peek();
+				if (ch == '"')
+				{
+					Advance();
+					return Utf8ToWideString(value);
+				}
+				if (IsLineBreak(ch))
+					ThrowError("multiline string is not supported");
+				if (ch != '\\')
+				{
+					value.push_back(ch);
+					Advance();
+					continue;
+				}
+
+				Advance();
+				char escaped = Peek();
+				if (escaped == '\0')
+					ThrowError("unterminated escape sequence");
+				switch (escaped)
+				{
+				case 'b':
+					value.push_back('\b');
+					break;
+				case 't':
+					value.push_back('\t');
+					break;
+				case 'n':
+					value.push_back('\n');
+					break;
+				case 'f':
+					value.push_back('\f');
+					break;
+				case 'r':
+					value.push_back('\r');
+					break;
+				case '"':
+					value.push_back('"');
+					break;
+				case '\\':
+					value.push_back('\\');
+					break;
+				default:
+					ThrowError("unsupported escape sequence");
+				}
+				Advance();
+			}
+			ThrowError("unterminated string");
+		}
+
+		std::wstring ParseLiteralString()
+		{
+			Expect('\'');
+			size_t begin = m_pos;
+			while (!IsEof())
+			{
+				if (Peek() == '\'')
+				{
+					auto value = Utf8ToWideString(m_source.substr(begin, m_pos - begin));
+					Advance();
+					return value;
+				}
+				if (IsLineBreak(Peek()))
+					ThrowError("multiline string is not supported");
+				Advance();
+			}
+			ThrowError("unterminated string");
+		}
+
+		uint32_t ParseInteger()
+		{
+			uint64_t value = 0;
+			bool hasDigit = false;
+			bool lastWasUnderscore = false;
+			while (!IsEof())
+			{
+				char ch = Peek();
+				if (ch >= '0' && ch <= '9')
+				{
+					hasDigit = true;
+					lastWasUnderscore = false;
+					value *= 10;
+					value += ch - '0';
+					if (value > std::numeric_limits<uint32_t>::max())
+						ThrowError("integer is too large");
+					Advance();
+					continue;
+				}
+				if (ch == '_')
+				{
+					if (!hasDigit || lastWasUnderscore)
+						ThrowError("invalid integer format");
+					lastWasUnderscore = true;
+					Advance();
+					continue;
+				}
+				break;
+			}
+			if (!hasDigit || lastWasUnderscore)
+				ThrowError("invalid integer format");
+			return static_cast<uint32_t>(value);
+		}
+
+		bool ParseBoolean()
+		{
+			if (m_source.substr(m_pos, 4) == "true")
+			{
+				m_pos += 4;
+				m_column += 4;
+				return true;
+			}
+			if (m_source.substr(m_pos, 5) == "false")
+			{
+				m_pos += 5;
+				m_column += 5;
+				return false;
+			}
+			ThrowError("invalid boolean value");
+		}
+
+		TomlValue ParseScalarValue()
+		{
+			if (Peek() == '"')
+				return ParseBasicString();
+			if (Peek() == '\'')
+				return ParseLiteralString();
+			if (Peek() >= '0' && Peek() <= '9')
+				return ParseInteger();
+			if (Peek() == 't' || Peek() == 'f')
+				return ParseBoolean();
+			ThrowError("unsupported value type");
+		}
+
+		TomlValue ParseArray()
+		{
+			Expect('[');
+			SkipArrayTrivia();
+			if (TryConsume(']'))
+				return std::vector<std::wstring>{};
+
+			auto firstValue = ParseScalarValue();
+			SkipArrayTrivia();
+			if (std::holds_alternative<std::wstring>(firstValue))
+			{
+				std::vector<std::wstring> values;
+				values.emplace_back(std::get<std::wstring>(std::move(firstValue)));
+				while (!TryConsume(']'))
+				{
+					Expect(',');
+					SkipArrayTrivia();
+					if (TryConsume(']'))
+						break;
+					auto value = ParseScalarValue();
+					if (!std::holds_alternative<std::wstring>(value))
+						ThrowError("array values must have the same type");
+					values.emplace_back(std::get<std::wstring>(std::move(value)));
+					SkipArrayTrivia();
+				}
+				return values;
+			}
+			if (std::holds_alternative<uint32_t>(firstValue))
+			{
+				std::vector<uint32_t> values;
+				values.emplace_back(std::get<uint32_t>(firstValue));
+				while (!TryConsume(']'))
+				{
+					Expect(',');
+					SkipArrayTrivia();
+					if (TryConsume(']'))
+						break;
+					auto value = ParseScalarValue();
+					if (!std::holds_alternative<uint32_t>(value))
+						ThrowError("array values must have the same type");
+					values.emplace_back(std::get<uint32_t>(value));
+					SkipArrayTrivia();
+				}
+				return values;
+			}
+
+			std::vector<bool> values;
+			values.emplace_back(std::get<bool>(firstValue));
+			while (!TryConsume(']'))
+			{
+				Expect(',');
+				SkipArrayTrivia();
+				if (TryConsume(']'))
+					break;
+				auto value = ParseScalarValue();
+				if (!std::holds_alternative<bool>(value))
+					ThrowError("array values must have the same type");
+				values.emplace_back(std::get<bool>(value));
+				SkipArrayTrivia();
+			}
+			return values;
+		}
+
+		TomlValue ParseValue()
+		{
+			if (Peek() == '[')
+				return ParseArray();
+			return ParseScalarValue();
+		}
+
+		static const std::wstring& ExpectString(const TomlValue& value, const char* keyName)
+		{
+			auto stringValue = std::get_if<std::wstring>(&value);
+			if (stringValue == nullptr)
+				throw std::runtime_error(std::string("TOML key requires string value: ") + keyName);
+			return *stringValue;
+		}
+
+		static uint32_t ExpectUInt32(const TomlValue& value, const char* keyName)
+		{
+			auto integerValue = std::get_if<uint32_t>(&value);
+			if (integerValue == nullptr)
+				throw std::runtime_error(std::string("TOML key requires integer value: ") + keyName);
+			return *integerValue;
+		}
+
+		static const std::vector<std::wstring>& ExpectStringArray(const TomlValue& value, const char* keyName)
+		{
+			auto arrayValue = std::get_if<std::vector<std::wstring>>(&value);
+			if (arrayValue == nullptr)
+				throw std::runtime_error(std::string("TOML key requires string array value: ") + keyName);
+			return *arrayValue;
+		}
+
+		void ApplyRootKey(const std::string& key, const TomlValue& value)
+		{
+			if (key == "wmi_poll_interval" || key == "wmiPollInterval")
+			{
+				m_config->wmiPollInterval = ExpectUInt32(value, key.c_str());
+			}
+			else if (key == "lru_size" || key == "lruSize")
+			{
+				m_config->lruSize = ExpectUInt32(value, key.c_str());
+			}
+			else if (key == "monitor_processes" || key == "monitorProcesses")
+			{
+				for (const auto& process : ExpectStringArray(value, key.c_str()))
+				{
+					m_config->m_monitorProcess.push_back({ process });
+				}
+			}
+			else if (key == "index_files" || key == "indexFiles")
+			{
+				for (const auto& path : ExpectStringArray(value, key.c_str()))
+				{
+					m_config->m_indexFile.push_back({ path });
+				}
+			}
+		}
+
+		void ApplyIndexFileKey(const std::string& key, const TomlValue& value)
+		{
+			if (m_config->m_indexFile.empty())
+				ThrowError("index_files table is not initialized");
+
+			if (key == "path")
+			{
+				m_config->m_indexFile.back().m_path = ExpectString(value, key.c_str());
+			}
+		}
+
+		void ParseKeyValue()
+		{
+			auto key = ParseKey();
+			SkipInlineTrivia();
+			Expect('=');
+			SkipInlineTrivia();
+			auto value = ParseValue();
+			FinishStatement();
+
+			switch (m_context)
+			{
+			case Context::Root:
+				ApplyRootKey(key, value);
+				break;
+			case Context::IndexFile:
+				ApplyIndexFileKey(key, value);
+				break;
+			case Context::Unknown:
+				break;
+			default:
+				throw std::logic_error("unexpected parser context");
+			}
+		}
+	};
+
+	std::unique_ptr<sfh::ConfigFile> ReadTomlConfigFromFile(const std::wstring& path)
+	{
+		auto content = ReadUtf8TextFile(path);
+		TomlConfigParser parser(content);
+		return parser.Parse();
 	}
 
 	class SimpleSAXContentHandler : public ISAXContentHandler
@@ -344,6 +980,30 @@ namespace
 		}
 	};
 
+	std::unique_ptr<sfh::ConfigFile> ReadXmlConfigFromFile(const std::wstring& path)
+	{
+		auto com = wil::CoInitializeEx();
+
+		wil::unique_variant pathVariant;
+		wil::com_ptr<IStream> stream;
+		THROW_IF_FAILED_MSG(
+			SHCreateStreamOnFileEx(
+				path.c_str(),
+				STGM_FAILIFTHERE | STGM_READ | STGM_SHARE_EXCLUSIVE,
+				FILE_ATTRIBUTE_NORMAL,
+				FALSE,
+				nullptr,
+				stream.put()), "CANNOT OPEN CONFIG FILE: %ws", path.c_str());
+		InitVariantFromUnknown(stream.query<IUnknown>().get(), pathVariant.addressof());
+
+		auto saxReader = wil::CoCreateInstance<ISAXXMLReader>(CLSID_SAXXMLReader30);
+		wil::com_ptr<ConfigSAXContentHandler> handler(new ConfigSAXContentHandler);
+		THROW_IF_FAILED(saxReader->putContentHandler(handler.get()));
+		THROW_IF_FAILED_MSG(saxReader->parse(pathVariant), "BAD CONFIG: %ws", path.c_str());
+
+		return handler->GetConfigFile();
+	}
+
 	class FontDatabaseSAXContentHandler : public SimpleSAXContentHandler
 	{
 	private:
@@ -580,26 +1240,10 @@ namespace
 
 std::unique_ptr<sfh::ConfigFile> sfh::ConfigFile::ReadFromFile(const std::wstring& path)
 {
-	auto com = wil::CoInitializeEx();
-
-	wil::unique_variant pathVariant;
-	wil::com_ptr<IStream> stream;
-	THROW_IF_FAILED_MSG(
-		SHCreateStreamOnFileEx(
-			path.c_str(),
-			STGM_FAILIFTHERE | STGM_READ | STGM_SHARE_EXCLUSIVE,
-			FILE_ATTRIBUTE_NORMAL,
-			FALSE,
-			nullptr,
-			stream.put()), "CANNOT OPEN CONFIG FILE: %ws", path.c_str());
-	InitVariantFromUnknown(stream.query<IUnknown>().get(), pathVariant.addressof());
-
-	auto saxReader = wil::CoCreateInstance<ISAXXMLReader>(CLSID_SAXXMLReader30);
-	wil::com_ptr<ConfigSAXContentHandler> handler(new ConfigSAXContentHandler);
-	THROW_IF_FAILED(saxReader->putContentHandler(handler.get()));
-	THROW_IF_FAILED_MSG(saxReader->parse(pathVariant), "BAD CONFIG: %ws", path.c_str());
-
-	return handler->GetConfigFile();
+	auto extension = std::filesystem::path(path).extension().wstring();
+	if (_wcsicmp(extension.c_str(), L".toml") == 0)
+		return ReadTomlConfigFromFile(path);
+	return ReadXmlConfigFromFile(path);
 }
 
 std::unique_ptr<sfh::FontDatabase> sfh::FontDatabase::ReadFromFile(const std::wstring& path)

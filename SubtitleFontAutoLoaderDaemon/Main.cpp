@@ -5,11 +5,13 @@
 #include "TrayIcon.h"
 #include "PersistantData.h"
 #include "ConfigWatcher.h"
+#include "ManagedIndexBuilder.h"
 #include "QueryService.h"
 #include "RpcServer.h"
 #include "ProcessMonitor.h"
 #include "Prefetch.h"
 #include "ToastNotifier.h"
+#include "../FontIndexCore/FontIndexCore.h"
 
 #include <queue>
 #include <variant>
@@ -27,6 +29,30 @@ namespace sfh
 
 	namespace
 	{
+		size_t GetDefaultWorkerCount()
+		{
+			auto concurrency = std::thread::hardware_concurrency();
+			if (concurrency <= 1)
+				return 1;
+			return (std::max)(1u, concurrency / 2);
+		}
+
+		bool IsManagedIndex(const ConfigFile::IndexFileElement& indexFile)
+		{
+			return !indexFile.m_sourceFolders.empty();
+		}
+
+		std::vector<std::filesystem::path> ResolveSourceFolders(const ConfigFile::IndexFileElement& indexFile)
+		{
+			std::vector<std::filesystem::path> paths;
+			paths.reserve(indexFile.m_sourceFolders.size());
+			for (const auto& path : indexFile.m_sourceFolders)
+			{
+				paths.emplace_back(std::filesystem::absolute(path).lexically_normal());
+			}
+			return paths;
+		}
+
 		std::filesystem::path ResolveConfigPath(const std::filesystem::path& directory)
 		{
 			std::error_code ec;
@@ -120,6 +146,7 @@ namespace sfh
 			std::unique_ptr<ProcessMonitor> m_processMonitor;
 			std::unique_ptr<Prefetch> m_prefetch;
 			std::unique_ptr<ConfigWatcher> m_configWatcher;
+			std::vector<std::unique_ptr<ManagedIndexBuilder>> m_managedIndexBuilders;
 		};
 
 		std::unique_ptr<Service> m_service;
@@ -200,14 +227,29 @@ namespace sfh
 			{
 				return ConfigFile::ReadFromFile(configPath);
 			});
+			const auto managedBuildWorkerCount = GetDefaultWorkerCount();
 
 			newService->m_systemTray = std::make_unique<SystemTray>(this);
 			std::vector<std::unique_ptr<FontDatabase>> dbs;
 			std::vector<std::filesystem::path> watchFiles;
+			std::vector<ManagedIndexBuilder::Task> managedIndexBuildTasks;
 			AppendConfigWatchFiles(watchFiles, selfPath);
 			for (auto& indexFile : cfg->m_indexFile)
 			{
 				auto indexPath = std::filesystem::absolute(indexFile.m_path).lexically_normal();
+				if (IsManagedIndex(indexFile))
+				{
+					std::error_code ec;
+					if (!std::filesystem::exists(indexPath, ec) || ec)
+					{
+						ManagedIndexBuilder::Task task;
+						task.m_indexPath = indexPath;
+						task.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
+						task.m_sourceFolders = ResolveSourceFolders(indexFile);
+						managedIndexBuildTasks.push_back(std::move(task));
+						continue;
+					}
+				}
 				watchFiles.emplace_back(indexPath);
 				dbs.emplace_back(ReadWithRetry([&]()
 				{
@@ -230,8 +272,13 @@ namespace sfh
 			}
 			newService->m_processMonitor->SetMonitorList(std::move(monitorProcess));
 			newService->m_configWatcher = std::make_unique<ConfigWatcher>(this, std::move(watchFiles));
-			newService->m_systemTray->NotifyFinishLoad();
 			m_service = std::move(newService);
+			for (auto& task : managedIndexBuildTasks)
+			{
+				m_service->m_managedIndexBuilders.emplace_back(
+					std::make_unique<ManagedIndexBuilder>(this, std::move(task), managedBuildWorkerCount));
+			}
+			m_service->m_systemTray->NotifyFinishLoad();
 		}
 
 		void OnException(std::exception_ptr exception)

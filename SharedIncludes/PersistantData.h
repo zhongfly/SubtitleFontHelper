@@ -13,6 +13,7 @@ namespace sfh
 		{
 			// content
 			std::wstring m_path;
+			std::vector<std::wstring> m_sourceFolders;
 		};
 
 		struct MonitorProcessElement

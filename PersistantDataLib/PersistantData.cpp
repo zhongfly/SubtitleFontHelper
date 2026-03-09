@@ -646,6 +646,10 @@ namespace
 			{
 				m_config->m_indexFile.back().m_path = ExpectString(value, key.c_str());
 			}
+			else if (key == "source_folders" || key == "sourceFolders")
+			{
+				m_config->m_indexFile.back().m_sourceFolders = ExpectStringArray(value, key.c_str());
+			}
 		}
 
 		void ParseKeyValue()

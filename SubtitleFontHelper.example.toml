@@ -1,0 +1,12 @@
+wmi_poll_interval = 1000
+lru_size = 100
+monitor_processes = [
+	'mpc-hc64_nvo.exe',
+	'mpc-hc_nvo.exe',
+]
+
+[[index_files]]
+path = 'E:\超级字体整合包 XZ\FontIndex.xml'
+source_folders = [
+	'E:\超级字体整合包 XZ',
+]

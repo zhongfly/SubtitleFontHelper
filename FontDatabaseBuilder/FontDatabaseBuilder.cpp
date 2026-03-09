@@ -1,7 +1,6 @@
 #include "Common.h"
 #include "ConsoleHelper.h"
 #include "Win32Helper.h"
-#include "FileDeduplicate.h"
 #include "../FontIndexCore/FontIndexCore.h"
 
 #include <shellapi.h>
@@ -118,34 +117,34 @@ void PrintHelp()
 		<< "\tDirectory: directories need to build index" << std::endl;
 }
 
-size_t CountDuplicateFiles(const DeduplicateResult& deduplicateResult)
+size_t CountDuplicateFiles(const FontIndexCore::DeduplicateResult& deduplicateResult)
 {
 	size_t total = 0;
-	for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
+	for (const auto& duplicateGroup : deduplicateResult.m_duplicateGroups)
 	{
-		total += duplicateGroup.duplicateFiles.size();
+		total += duplicateGroup.m_duplicateFiles.size();
 	}
 	return total;
 }
 
-void PrintDuplicateFiles(const DeduplicateResult& deduplicateResult)
+void PrintDuplicateFiles(const FontIndexCore::DeduplicateResult& deduplicateResult)
 {
-	if (deduplicateResult.duplicateGroups.empty())
+	if (deduplicateResult.m_duplicateGroups.empty())
 	{
 		std::wcout << SetOutputGreen << L"No duplicate files found." << std::endl << SetOutputDefault;
 		return;
 	}
 
-	std::wcout << SetOutputYellow << L"Duplicate groups: " << deduplicateResult.duplicateGroups.size()
+	std::wcout << SetOutputYellow << L"Duplicate groups: " << deduplicateResult.m_duplicateGroups.size()
 		<< L", duplicate files: " << CountDuplicateFiles(deduplicateResult) << std::endl
 		<< SetOutputDefault;
 
-	for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
+	for (const auto& duplicateGroup : deduplicateResult.m_duplicateGroups)
 	{
-		std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.keepFile << std::endl;
-		for (const auto& duplicatePath : duplicateGroup.duplicateFiles)
+		std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.m_keepFile.c_str() << std::endl;
+		for (const auto& duplicatePath : duplicateGroup.m_duplicateFiles)
 		{
-			std::wcout << L"  " << SetOutputYellow << L"[Duplicate] " << SetOutputDefault << duplicatePath <<
+			std::wcout << L"  " << SetOutputYellow << L"[Duplicate] " << SetOutputDefault << duplicatePath.c_str() <<
 				std::endl;
 		}
 		std::wcout << std::endl;
@@ -246,32 +245,38 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			return g_cancelToken.load();
 		});
 
-		std::vector<std::wstring> fileSet;
-		std::vector<uint64_t> fileSize;
-		fileSet.reserve(discoveredFiles.size());
-		fileSize.reserve(discoveredFiles.size());
-		for (const auto& file : discoveredFiles)
-		{
-			fileSet.emplace_back(file.m_path.c_str());
-			fileSize.emplace_back(file.m_fileSize);
-		}
-		std::wcout << "Discovered " << fileSet.size() << " files." << std::endl;
+		std::wcout << "Discovered " << discoveredFiles.size() << " files." << std::endl;
 
-		if (fileSet.empty())
+		if (discoveredFiles.empty())
 		{
 			std::wcout << "Nothing to do." << std::endl;
 			return 0;
 		}
 
+		std::vector<std::filesystem::path> filesToAnalyze;
+
 		if (options.deduplicate)
 		{
 			std::wcout << "Deduplicate..." << std::endl;
 			std::atomic<size_t> progress = 0;
-			const size_t total = fileSet.size();
-			DeduplicateResult deduplicateResult;
+			const size_t total = discoveredFiles.size();
+			FontIndexCore::DeduplicateResult deduplicateResult;
 			std::thread thr([&]()
 			{
-				deduplicateResult = Deduplicate(fileSet, fileSize, progress);
+				deduplicateResult = FontIndexCore::DeduplicateFiles(
+					discoveredFiles,
+					g_WorkerCount,
+					[]()
+					{
+						return g_cancelToken.load();
+					},
+					&progress,
+					[](const std::filesystem::path& path, const std::string& errorMessage)
+					{
+						EraseLineStruct::EraseLine();
+						std::wcout << SetOutputRed << L"Error hashing file: " << path.c_str() << L'\n';
+						std::cout << "Error description: " << errorMessage << std::endl << SetOutputDefault;
+					});
 			});
 			while (!g_cancelToken)
 			{
@@ -286,10 +291,10 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			std::wcout << std::endl;
 			ThrowIfCancelled();
 			PrintDuplicateFiles(deduplicateResult);
-			fileSet = std::move(deduplicateResult.uniqueFiles);
+			filesToAnalyze = std::move(deduplicateResult.m_uniqueFiles);
 			if (options.deleteDuplicates)
 			{
-				if (deduplicateResult.duplicateGroups.empty())
+				if (deduplicateResult.m_duplicateGroups.empty())
 				{
 					std::wcout << "Move duplicates to recycle bin..." << std::endl;
 					std::wcout << SetOutputGreen << L"No duplicate files to recycle." << std::endl <<
@@ -298,21 +303,21 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 				else
 				{
 					std::wcout << "Move duplicates to recycle bin..." << std::endl;
-					for (const auto& duplicateGroup : deduplicateResult.duplicateGroups)
+					for (const auto& duplicateGroup : deduplicateResult.m_duplicateGroups)
 					{
-						std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.keepFile <<
+						std::wcout << SetOutputGreen << L"[Keep] " << SetOutputDefault << duplicateGroup.m_keepFile.c_str() <<
 							std::endl;
-						for (const auto& duplicatePath : duplicateGroup.duplicateFiles)
+						for (const auto& duplicatePath : duplicateGroup.m_duplicateFiles)
 						{
 							try
 							{
-								MoveFileToRecycleBin(duplicatePath);
+								MoveFileToRecycleBin(duplicatePath.c_str());
 								std::wcout << L"  " << SetOutputYellow << L"[Recycled] " << SetOutputDefault <<
-									duplicatePath << std::endl;
+									duplicatePath.c_str() << std::endl;
 							}
 							catch (std::exception& e)
 							{
-								std::wcout << L"  " << SetOutputRed << L"[Failed] " << duplicatePath <<
+								std::wcout << L"  " << SetOutputRed << L"[Failed] " << duplicatePath.c_str() <<
 									std::endl;
 								std::cout << e.what() << std::endl << SetOutputDefault;
 							}
@@ -321,20 +326,21 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 					}
 				}
 			}
-			std::wcout << "Discovered " << fileSet.size() << " files." << std::endl;
+			std::wcout << "Discovered " << filesToAnalyze.size() << " files." << std::endl;
+		}
+		else
+		{
+			filesToAnalyze.reserve(discoveredFiles.size());
+			for (const auto& file : discoveredFiles)
+			{
+				filesToAnalyze.push_back(file.m_path);
+			}
 		}
 
 		std::wcout << "Build database..." << std::endl;
 
 		std::mutex logLock;
 		sfh::FontDatabase db;
-		std::vector<std::filesystem::path> filesToAnalyze;
-		filesToAnalyze.reserve(fileSet.size());
-		for (const auto& file : fileSet)
-		{
-			filesToAnalyze.emplace_back(file);
-		}
-
 		std::atomic<size_t> progress = 0;
 		std::thread buildThread([&]()
 		{

@@ -297,7 +297,7 @@ namespace FontIndexCore
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
 		std::atomic<size_t>* progress,
-		const AnalyzeFontFileErrorCallback& onError)
+		const FileOperationErrorCallback& onError)
 	{
 		sfh::FontDatabase db;
 		db.m_fonts.reserve(fontFiles.size());

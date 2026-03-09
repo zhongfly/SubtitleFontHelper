@@ -189,7 +189,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="FileDeduplicate.cpp" />
     <ClCompile Include="FontDatabaseBuilder.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -203,7 +202,6 @@
   <ItemGroup>
     <ClInclude Include="Common.h" />
     <ClInclude Include="ConsoleHelper.h" />
-    <ClInclude Include="FileDeduplicate.h" />
     <ClInclude Include="Win32Helper.h" />
   </ItemGroup>
   <ItemGroup>

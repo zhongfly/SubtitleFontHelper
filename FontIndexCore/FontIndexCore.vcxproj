@@ -201,6 +201,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FontDatabaseBuild.cpp" />
+    <ClCompile Include="FontDeduplicate.cpp" />
     <ClCompile Include="FontIndexCore.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -250,7 +250,10 @@ namespace FontIndexCore
 				XXH3Context context;
 				while (true)
 				{
-					ThrowIfCancelled(isCancelled);
+					if (isCancelled && isCancelled())
+					{
+						return;
+					}
 
 					size_t recordIndex = 0;
 					{

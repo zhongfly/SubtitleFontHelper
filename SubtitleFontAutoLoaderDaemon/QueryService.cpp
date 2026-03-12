@@ -8,6 +8,7 @@
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 #include <unordered_map>
+#include <set>
 
 namespace
 {
@@ -383,16 +384,64 @@ public:
 		});
 	}
 
-	void RetainHighestPriority(std::vector<FontDatabase::FontFaceElement*>& faces) const
+	void SortByPriority(std::vector<FontDatabase::FontFaceElement*>& faces) const
 	{
-		if (faces.empty())
-			return;
-		auto priority = GetPriority(faces.front());
+		std::stable_sort(faces.begin(), faces.end(), [&](FontDatabase::FontFaceElement* left,
+		                                                 FontDatabase::FontFaceElement* right)
+		{
+			return GetPriority(left) < GetPriority(right);
+		});
+	}
+
+	static std::wstring GetFamilyDedupKey(const FontDatabase::FontFaceElement* face)
+	{
+		std::vector<const std::wstring*> familyNames;
+		for (const auto& name : face->m_names)
+		{
+			if (name.m_type == FontDatabase::FontFaceElement::NameElement::Win32FamilyName)
+			{
+				familyNames.push_back(&name.m_name);
+			}
+		}
+
+		std::sort(familyNames.begin(), familyNames.end(), [](const std::wstring* left, const std::wstring* right)
+		{
+			return *left < *right;
+		});
+		familyNames.erase(std::unique(familyNames.begin(), familyNames.end(), [](const std::wstring* left,
+		                                                                         const std::wstring* right)
+		{
+			return *left == *right;
+		}), familyNames.end());
+
+		std::wstring key;
+		for (const auto* familyName : familyNames)
+		{
+			key += *familyName;
+			key.push_back(L'\x1f');
+		}
+		return key;
+	}
+
+	void RetainDistinctFamilyFaces(std::vector<FontDatabase::FontFaceElement*>& faces) const
+	{
+		SortByPriority(faces);
+		std::set<std::tuple<std::wstring, uint32_t, uint32_t, uint32_t>> seen;
+		std::vector<FontDatabase::FontFaceElement*> filtered;
+		filtered.reserve(faces.size());
 		for (auto face : faces)
 		{
-			priority = (std::min)(priority, GetPriority(face));
+			auto [iter, inserted] = seen.emplace(
+				GetFamilyDedupKey(face),
+				face->m_weight,
+				face->m_oblique,
+				face->m_psOutline);
+			if (inserted)
+			{
+				filtered.push_back(face);
+			}
 		}
-		RetainPriority(faces, priority);
+		faces = std::move(filtered);
 	}
 
 	std::optional<size_t> GetHighestPriority(const std::vector<FontDatabase::FontFaceElement*>& first,
@@ -459,7 +508,7 @@ public:
 		ret.set_version(1);
 
 		auto family = m_win32FamilyName.QueryEntry(queryString.c_str(), doTruncated);
-		RetainHighestPriority(family);
+		RetainDistinctFamilyFaces(family);
 		if (!family.empty())
 		{
 			// if it's a valid family name, return the list

@@ -283,7 +283,7 @@ namespace
 
 		void SkipInlineTrivia()
 		{
-			while (!IsEof() && (IsSpaceOrTab(Peek()) || Peek() == '\r'))
+			while (!IsEof() && IsSpaceOrTab(Peek()))
 			{
 				Advance();
 			}

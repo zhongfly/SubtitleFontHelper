@@ -246,12 +246,23 @@ namespace sfh
 			InitializeFolderWatches();
 			m_worker = std::jthread([this](std::stop_token stopToken)
 			{
-				WorkerProcedure(stopToken);
+				try
+				{
+					WorkerProcedure(stopToken);
+				}
+				catch (...)
+				{
+					if (!stopToken.stop_requested())
+					{
+						m_daemon->NotifyException(std::current_exception());
+					}
+				}
 			});
 		}
 
 		~Implementation()
 		{
+			m_worker.request_stop();
 			m_exitEvent.SetEvent();
 			for (auto& watch : m_folderWatches)
 			{

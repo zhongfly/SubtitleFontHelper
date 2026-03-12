@@ -136,6 +136,13 @@ namespace sfh
 		: m_worker([daemon, task = std::move(task), workerCount](std::stop_token stopToken)
 		{
 			const auto indexName = GetDisplayName(task.m_indexPath);
+			auto clearBuildInProgress = wil::scope_exit([&]()
+			{
+				if (task.m_buildInProgress)
+				{
+					task.m_buildInProgress->store(false);
+				}
+			});
 			TryShowToast(L"Subtitle Font Helper", L"开始建立索引：" + indexName);
 
 			try

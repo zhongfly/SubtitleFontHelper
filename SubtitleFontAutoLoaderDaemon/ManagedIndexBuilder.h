@@ -3,7 +3,9 @@
 #include "pch.h"
 #include "IDaemon.h"
 
+#include <atomic>
 #include <functional>
+#include <memory>
 
 namespace sfh
 {
@@ -15,6 +17,7 @@ namespace sfh
 			std::filesystem::path m_indexPath;
 			std::filesystem::path m_snapshotPath;
 			std::vector<std::filesystem::path> m_sourceFolders;
+			std::shared_ptr<std::atomic<bool>> m_buildInProgress;
 		};
 
 		ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount);

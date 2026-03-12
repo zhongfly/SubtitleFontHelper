@@ -299,17 +299,19 @@ namespace sfh
 					managedTask.m_sourceFolders = sourceFolders;
 
 					ManagedIndexWatcher::Options watchOptions;
-					watchOptions.m_task = managedTask;
 					watchOptions.m_workerCount = managedBuildWorkerCount;
 
 					std::error_code ec;
 					if (!std::filesystem::exists(indexPath, ec) || ec)
 					{
+						managedTask.m_buildInProgress = std::make_shared<std::atomic<bool>>(true);
+						watchOptions.m_task = managedTask;
 						watchOptions.m_skipInitialSync = true;
 						managedIndexBuildTasks.push_back(std::move(managedTask));
 						managedIndexWatchOptions.push_back(std::move(watchOptions));
 						continue;
 					}
+					watchOptions.m_task = std::move(managedTask);
 					managedIndexWatchOptions.push_back(std::move(watchOptions));
 				}
 

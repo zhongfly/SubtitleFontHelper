@@ -279,6 +279,11 @@ namespace sfh
 			return std::filesystem::absolute(path).lexically_normal();
 		}
 
+		bool IsExternalBuildInProgress() const
+		{
+			return m_task.m_buildInProgress && m_task.m_buildInProgress->load();
+		}
+
 		bool QueueRead(FolderWatch& watch)
 		{
 			ResetEvent(watch.m_event.get());
@@ -697,6 +702,11 @@ namespace sfh
 				{
 					if (pendingSync)
 					{
+						if (IsExternalBuildInProgress())
+						{
+							debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
+							continue;
+						}
 						auto newSnapshot = CaptureSnapshot(stopToken);
 						if (m_hasLastSnapshot)
 						{

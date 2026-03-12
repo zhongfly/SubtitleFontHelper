@@ -11,6 +11,7 @@
 #include <Windows.h>
 
 #include <optional>
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 #include <wil/resource.h>
@@ -29,6 +30,75 @@ namespace sfh
 		std::wstring GetDisplayName(const std::filesystem::path& path)
 		{
 			return path.filename().empty() ? path.wstring() : path.filename().wstring();
+		}
+
+		constexpr size_t TOAST_FILE_NAME_LIMIT = 3;
+
+		std::wstring BuildChangedFileList(const wchar_t* label, const std::unordered_set<std::wstring>& paths)
+		{
+			if (paths.empty())
+			{
+				return {};
+			}
+
+			std::vector<std::wstring> names;
+			names.reserve(paths.size());
+			for (const auto& path : paths)
+			{
+				names.push_back(GetDisplayName(std::filesystem::path(path)));
+			}
+			std::sort(names.begin(), names.end());
+
+			const size_t visibleCount = names.size() < TOAST_FILE_NAME_LIMIT
+				? names.size()
+				: TOAST_FILE_NAME_LIMIT;
+			std::wstring line = std::wstring(label) + L"：";
+			for (size_t i = 0; i < visibleCount; ++i)
+			{
+				if (i != 0)
+				{
+					line += L"、";
+				}
+				line += names[i];
+			}
+			if (names.size() > visibleCount)
+			{
+				line += L" 等 " + std::to_wstring(names.size()) + L" 个";
+			}
+			return line;
+		}
+
+		std::wstring BuildSyncToastMessage(
+			const std::wstring& indexName,
+			const std::unordered_set<std::wstring>& addedPaths,
+			const std::unordered_set<std::wstring>& removedPaths,
+			const std::unordered_set<std::wstring>& modifiedPaths)
+		{
+			std::wstring message = L"索引同步完成：" + indexName
+				+ L"（新增 " + std::to_wstring(addedPaths.size())
+				+ L"，删除 " + std::to_wstring(removedPaths.size())
+				+ L"，修改 " + std::to_wstring(modifiedPaths.size())
+				+ L"）";
+
+			const auto addedLine = BuildChangedFileList(L"新增", addedPaths);
+			if (!addedLine.empty())
+			{
+				message += L"\n" + addedLine;
+			}
+
+			const auto removedLine = BuildChangedFileList(L"删除", removedPaths);
+			if (!removedLine.empty())
+			{
+				message += L"\n" + removedLine;
+			}
+
+			const auto modifiedLine = BuildChangedFileList(L"修改", modifiedPaths);
+			if (!modifiedLine.empty())
+			{
+				message += L"\n" + modifiedLine;
+			}
+
+			return message;
 		}
 
 		void TryShowToast(const std::wstring& title, const std::wstring& message)
@@ -414,8 +484,10 @@ namespace sfh
 				currentPaths.reserve(newSnapshot.m_files.size());
 				std::unordered_set<std::wstring> changedPaths;
 				changedPaths.reserve(newSnapshot.m_files.size());
-				size_t addedCount = 0;
-				size_t modifiedCount = 0;
+				std::unordered_set<std::wstring> addedPaths;
+				addedPaths.reserve(newSnapshot.m_files.size());
+				std::unordered_set<std::wstring> modifiedPaths;
+				modifiedPaths.reserve(newSnapshot.m_files.size());
 				for (const auto& entry : newSnapshot.m_files)
 				{
 					const auto key = entry.m_path.wstring();
@@ -424,12 +496,12 @@ namespace sfh
 					if (oldEntry == oldEntries.end())
 					{
 						changedPaths.insert(key);
-						++addedCount;
+						addedPaths.insert(key);
 					}
 					else if (!HasSameMetadata(*oldEntry->second, entry))
 					{
 						changedPaths.insert(key);
-						++modifiedCount;
+						modifiedPaths.insert(key);
 					}
 				}
 
@@ -523,11 +595,7 @@ namespace sfh
 
 				TryShowToast(
 					L"Subtitle Font Helper",
-					L"索引同步完成：" + indexName
-					+ L"（新增 " + std::to_wstring(addedCount)
-					+ L"，删除 " + std::to_wstring(removedPaths.size())
-					+ L"，修改 " + std::to_wstring(modifiedCount)
-					+ L"）");
+					BuildSyncToastMessage(indexName, addedPaths, removedPaths, modifiedPaths));
 				m_daemon->NotifyManagedIndexBuilt();
 			}
 			catch (const std::exception& e)

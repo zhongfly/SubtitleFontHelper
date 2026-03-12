@@ -612,7 +612,7 @@ namespace sfh
 				TryShowToast(
 					L"Subtitle Font Helper",
 					BuildSyncToastMessage(indexName, addedPaths, removedPaths, modifiedPaths));
-				m_daemon->NotifyManagedIndexBuilt();
+				m_daemon->NotifyManagedIndexBuilt(m_task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{

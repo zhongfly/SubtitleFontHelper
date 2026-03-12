@@ -9,6 +9,7 @@
 #pragma comment(lib, "wbemuuid.lib")
 
 #include <queue>
+#include <unordered_map>
 
 #include <wil/win32_helpers.h>
 #include <wil/resource.h>
@@ -41,15 +42,34 @@ namespace
 class sfh::ProcessMonitor::Implementation
 {
 private:
+	struct ConfigSnapshot
+	{
+		std::vector<std::wstring> m_list;
+		std::chrono::milliseconds m_interval = std::chrono::milliseconds(0);
+	};
+
+	struct EventRecord
+	{
+		uint64_t m_revision = 0;
+		wil::com_ptr<IWbemClassObject> m_object;
+	};
+
 	std::mutex m_accessLock;
-	std::vector<std::wstring> m_list;
+	std::unordered_map<uint64_t, ConfigSnapshot> m_configSnapshots;
+	uint64_t m_nextConfigRevision = 1;
+	std::atomic<uint64_t> m_requestedConfigRevision = 0;
+	std::mutex m_configStateLock;
+	std::condition_variable m_configStateCV;
+	uint64_t m_appliedConfigRevision = 0;
+	uint64_t m_failedConfigRevision = 0;
+	std::exception_ptr m_failedConfigException;
 
 	std::atomic<size_t> m_checkPoint = 0;
 	std::atomic<bool> m_exitFlag = false;
 	std::thread m_worker;
+	wil::unique_event m_startEvent;
 
 	IDaemon* m_daemon;
-	std::chrono::milliseconds m_interval;
 
 	constexpr static const wchar_t* QUERY_STRING_TEMPLATE =
 		L"SELECT * FROM __InstanceCreationEvent WITHIN %.3f WHERE TargetInstance ISA 'Win32_Process'";
@@ -59,9 +79,10 @@ private:
 	private:
 		std::atomic<ULONG> m_refCount;
 		Implementation* m_impl;
+		uint64_t m_revision;
 	public:
-		EventSink(Implementation* impl)
-			: m_refCount(1), m_impl(impl)
+		EventSink(Implementation* impl, uint64_t revision)
+			: m_refCount(1), m_impl(impl), m_revision(revision)
 		{
 		}
 
@@ -104,7 +125,7 @@ private:
 			IWbemClassObject __RPC_FAR* __RPC_FAR* apObjArray
 		)
 		{
-			m_impl->PostNewEvent(apObjArray, lObjectCount);
+			m_impl->PostNewEvent(m_revision, apObjArray, lObjectCount);
 			return WBEM_S_NO_ERROR;
 		}
 
@@ -119,23 +140,33 @@ private:
 		}
 	};
 
-	std::queue<wil::com_ptr<IWbemClassObject>> m_queue;
+	std::queue<EventRecord> m_queue;
 	std::mutex m_queueMutex;
 	std::condition_variable m_queueCV;
 
 public:
 	Implementation(IDaemon* daemon, std::chrono::milliseconds interval)
-		: m_daemon(daemon), m_interval(interval)
+		: m_daemon(daemon)
 	{
+		m_configSnapshots.emplace(0, ConfigSnapshot{ {}, interval });
+		m_startEvent.create(wil::EventOptions::ManualReset);
 		m_worker = std::thread([&]()
 		{
+			++m_checkPoint;
+			if (WaitForSingleObject(m_startEvent.get(), INFINITE) != WAIT_OBJECT_0 || m_exitFlag.load())
+				return;
 			try
 			{
 				WorkerProcedure();
 			}
 			catch (...)
 			{
-				++m_checkPoint;
+				{
+					std::lock_guard lg(m_configStateLock);
+					m_failedConfigRevision = m_requestedConfigRevision.load();
+					m_failedConfigException = std::current_exception();
+				}
+				m_configStateCV.notify_all();
 				daemon->NotifyException(std::current_exception());
 			}
 		});
@@ -146,31 +177,107 @@ public:
 	~Implementation()
 	{
 		m_exitFlag = true;
+		m_startEvent.SetEvent();
 		m_queueCV.notify_one();
+		m_configStateCV.notify_all();
 		if (m_worker.joinable())
 			m_worker.join();
 	}
 
-	void SetMonitorList(std::vector<std::wstring>&& list)
+	void Start()
 	{
-		std::lock_guard lg(m_accessLock);
-		for (auto& item : list)
-		{
-			if (_wcsicmp(item.c_str(), L"rundll32.exe") == 0)
-				throw std::logic_error("rundll32.exe is not allowed!");
-		}
-		m_list = std::move(list);
+		m_startEvent.SetEvent();
 	}
 
-	void PostNewEvent(IWbemClassObject** events, size_t count)
+	void SetOptions(std::vector<std::wstring>&& list, std::chrono::milliseconds interval)
 	{
-		std::lock_guard lg(m_queueMutex);
-		for (size_t i = 0; i < count; ++i)
-			m_queue.emplace(events[i]);
+		uint64_t revision = 0;
+		{
+			std::lock_guard lg(m_accessLock);
+			revision = m_nextConfigRevision++;
+			m_configSnapshots[revision] = { std::move(list), interval };
+		}
+		{
+			std::lock_guard lg(m_configStateLock);
+			m_requestedConfigRevision.store(revision);
+		}
 		m_queueCV.notify_one();
+		std::unique_lock ul(m_configStateLock);
+		m_configStateCV.wait(ul, [&]()
+		{
+			return m_exitFlag.load()
+				|| m_appliedConfigRevision == revision
+				|| m_failedConfigRevision == revision;
+		});
+		if (m_exitFlag.load())
+			throw std::runtime_error("process monitor stopped before applying configuration");
+		if (m_failedConfigRevision == revision)
+		{
+			auto exception = m_failedConfigException;
+			ul.unlock();
+			{
+				std::lock_guard lg(m_accessLock);
+				m_configSnapshots.erase(revision);
+			}
+			std::rethrow_exception(exception);
+		}
 	}
 
 private:
+	ConfigSnapshot GetConfigSnapshot(uint64_t revision)
+	{
+		std::lock_guard lg(m_accessLock);
+		if (auto iter = m_configSnapshots.find(revision); iter != m_configSnapshots.end())
+			return iter->second;
+		return {};
+	}
+
+	wil::com_ptr<IWbemObjectSink> CreateSinkStub(IWbemServices* wbemService, uint64_t revision)
+	{
+		wil::com_ptr<EventSink> sink(new EventSink(this, revision));
+		wil::com_ptr<IWbemObjectSink> sinkStub;
+
+		wil::com_ptr<IUnsecuredApartment> apartment;
+		THROW_IF_FAILED(CoCreateInstance(
+			CLSID_UnsecuredApartment,
+			NULL,
+			CLSCTX_LOCAL_SERVER,
+			IID_IUnsecuredApartment,
+			apartment.put_void()));
+
+		auto wbemApartment = apartment.try_query<IWbemUnsecuredApartment>();
+		if (wbemApartment)
+		{
+			wil::com_ptr<IUnknown> unkStub;
+			THROW_IF_FAILED(wbemApartment->CreateSinkStub(
+				sink.get(),
+				WBEM_FLAG_UNSECAPP_DEFAULT_CHECK_ACCESS,
+				nullptr,
+				reinterpret_cast<IWbemObjectSink**>(unkStub.put())));
+			sinkStub = unkStub.query<IWbemObjectSink>();
+		}
+		else
+		{
+			wil::com_ptr<IUnknown> unkStub;
+			THROW_IF_FAILED(apartment->CreateObjectStub(sink.get(), unkStub.put_unknown()));
+			sinkStub = unkStub.query<IWbemObjectSink>();
+		}
+
+		auto snapshot = GetConfigSnapshot(revision);
+		wchar_t queryString[128];
+		swprintf(queryString, std::extent_v<decltype(queryString)>, QUERY_STRING_TEMPLATE,
+		         static_cast<double>(snapshot.m_interval.count()) / 1000.0);
+
+		THROW_IF_FAILED(wbemService->ExecNotificationQueryAsync(
+			wil::make_bstr(L"WQL").get(),
+			wil::make_bstr(queryString).get(),
+			WBEM_FLAG_SEND_STATUS,
+			nullptr,
+			sinkStub.get()
+		));
+		return sinkStub;
+	}
+
 	void WorkerProcedure()
 	{
 		auto com = wil::CoInitializeEx();
@@ -200,77 +307,86 @@ private:
 			EOAC_NONE
 		));
 
-
-		wil::com_ptr<EventSink> sink(new EventSink(this));
 		wil::com_ptr<IWbemObjectSink> sinkStub;
-
-		wil::com_ptr<IUnsecuredApartment> apartment;
-		THROW_IF_FAILED(CoCreateInstance(
-			CLSID_UnsecuredApartment,
-			NULL,
-			CLSCTX_LOCAL_SERVER,
-			IID_IUnsecuredApartment,
-			apartment.put_void()));
-
-		auto wbemApartment = apartment.try_query<IWbemUnsecuredApartment>();
-		if (wbemApartment)
-		{
-			wil::com_ptr<IUnknown> unkStub;
-			THROW_IF_FAILED(wbemApartment->CreateSinkStub(
-				sink.get(),
-				WBEM_FLAG_UNSECAPP_DEFAULT_CHECK_ACCESS,
-				nullptr,
-				reinterpret_cast<IWbemObjectSink**>(unkStub.put())));
-			sinkStub = unkStub.query<IWbemObjectSink>();
-		}
-		else
-		{
-			wil::com_ptr<IUnknown> unkStub;
-			THROW_IF_FAILED(apartment->CreateObjectStub(sink.get(), unkStub.put_unknown()));
-			sinkStub = unkStub.query<IWbemObjectSink>();
-		}
-
-
-		wchar_t queryString[128];
-		swprintf(queryString, std::extent_v<decltype(queryString)>, QUERY_STRING_TEMPLATE,
-		         static_cast<double>(m_interval.count()) / 1000.0);
-
-		THROW_IF_FAILED(wbemService->ExecNotificationQueryAsync(
-			wil::make_bstr(L"WQL").get(),
-			wil::make_bstr(queryString).get(),
-			WBEM_FLAG_SEND_STATUS,
-			nullptr,
-			sinkStub.get()
-		));
-
-		++m_checkPoint;
+		uint64_t subscribedRevision = 0;
 
 		while (!m_exitFlag.load())
 		{
-			std::unique_lock lock(m_queueMutex);
-			m_queueCV.wait(lock, [&]() { return !m_queue.empty() || m_exitFlag; });
-			if (m_exitFlag)
-				break;
-
-			while (!m_queue.empty())
+			const auto requestedRevision = m_requestedConfigRevision.load();
+			if (requestedRevision != 0 && requestedRevision != subscribedRevision)
 			{
-				wil::com_ptr<IWbemClassObject> object = std::move(m_queue.front());
-				m_queue.pop();
-				lock.unlock();
 				try
 				{
-					HandleProcessCreation(object.get(), wbemService.get());
+					auto newSinkStub = CreateSinkStub(wbemService.get(), requestedRevision);
+					auto oldSinkStub = std::move(sinkStub);
+					sinkStub = std::move(newSinkStub);
+					subscribedRevision = requestedRevision;
+					{
+						std::lock_guard lg(m_configStateLock);
+						m_appliedConfigRevision = requestedRevision;
+						m_failedConfigException = nullptr;
+					}
+					m_configStateCV.notify_all();
+					++m_checkPoint;
+					if (oldSinkStub)
+						wbemService->CancelAsyncCall(oldSinkStub.get());
 				}
 				catch (...)
 				{
+					{
+						std::lock_guard lg(m_configStateLock);
+						m_failedConfigRevision = requestedRevision;
+						m_failedConfigException = std::current_exception();
+						m_requestedConfigRevision.store(subscribedRevision);
+					}
+					m_configStateCV.notify_all();
 				}
-				lock.lock();
+				continue;
+			}
+
+			std::unique_lock lock(m_queueMutex);
+			m_queueCV.wait(lock, [&]()
+			{
+				return !m_queue.empty()
+					|| m_exitFlag
+					|| m_requestedConfigRevision.load() != subscribedRevision;
+			});
+			if (m_exitFlag)
+				break;
+			if (m_requestedConfigRevision.load() != subscribedRevision)
+				continue;
+			if (m_queue.empty())
+				continue;
+
+			EventRecord eventRecord = std::move(m_queue.front());
+			m_queue.pop();
+			lock.unlock();
+			try
+			{
+				auto snapshot = GetConfigSnapshot(eventRecord.m_revision);
+				HandleProcessCreation(eventRecord.m_object.get(), wbemService.get(), snapshot.m_list);
+			}
+			catch (...)
+			{
 			}
 		}
-		wbemService->CancelAsyncCall(sinkStub.get());
+
+		if (sinkStub)
+			wbemService->CancelAsyncCall(sinkStub.get());
 	}
 
-	void HandleProcessCreation(IWbemClassObject* object, IWbemServices* service)
+	void PostNewEvent(uint64_t revision, IWbemClassObject** events, size_t count)
+	{
+		std::lock_guard lg(m_queueMutex);
+		for (size_t i = 0; i < count; ++i)
+			m_queue.push({ revision, events[i] });
+		m_queueCV.notify_one();
+	}
+
+	void HandleProcessCreation(
+		IWbemClassObject* object,
+		IWbemServices* service,
+		const std::vector<std::wstring>& monitorList)
 	{
 		wil::unique_variant targetInstanceVariant;
 		THROW_IF_FAILED(object->Get(L"TargetInstance", 0, targetInstanceVariant.addressof(), nullptr, nullptr));
@@ -284,19 +400,16 @@ private:
 		if (executablePath == nullptr)
 			return;
 		size_t exePathLength = wcslen(executablePath);
+		for (auto& name : monitorList)
 		{
-			std::lock_guard lg(m_accessLock);
-			for (auto& name : m_list)
+			const wchar_t* comparisonStart = executablePath + exePathLength - name.size();
+			if ((comparisonStart == executablePath
+					|| (comparisonStart > executablePath
+						&& (*(comparisonStart - 1) == L'\\' || *(comparisonStart - 1) == L'/')))
+				&& _wcsicmp(comparisonStart, name.c_str()) == 0)
 			{
-				const wchar_t* comparisonStart = executablePath + exePathLength - name.size();
-				if ((comparisonStart == executablePath
-						|| (comparisonStart > executablePath
-							&& (*(comparisonStart - 1) == L'\\' || *(comparisonStart - 1) == L'/')))
-					&& _wcsicmp(comparisonStart, name.c_str()) == 0)
-				{
-					filteredOut = false;
-					break;
-				}
+				filteredOut = false;
+				break;
 			}
 		}
 
@@ -391,7 +504,12 @@ sfh::ProcessMonitor::ProcessMonitor(IDaemon* daemon, std::chrono::milliseconds i
 
 sfh::ProcessMonitor::~ProcessMonitor() = default;
 
-void sfh::ProcessMonitor::SetMonitorList(std::vector<std::wstring>&& list)
+void sfh::ProcessMonitor::Start()
 {
-	m_impl->SetMonitorList(std::move(list));
+	m_impl->Start();
+}
+
+void sfh::ProcessMonitor::SetOptions(std::vector<std::wstring>&& list, std::chrono::milliseconds interval)
+{
+	m_impl->SetOptions(std::move(list), interval);
 }

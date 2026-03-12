@@ -21,6 +21,7 @@ namespace sfh
 		SystemTray& operator=(const SystemTray&) = delete;
 		SystemTray& operator=(SystemTray&&) = delete;
 
+		void Start();
 		void NotifyFinishLoad();
 	};
 }

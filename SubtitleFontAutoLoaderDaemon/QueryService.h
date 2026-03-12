@@ -22,7 +22,8 @@ namespace sfh
 		QueryService& operator=(const QueryService&) = delete;
 		QueryService& operator=(QueryService&&) = delete;
 
-		void Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs);
+		void Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, bool publishVersion = true);
+		void PublishVersion();
 
 		IRpcRequestHandler* GetRpcRequestHandler();
 	};

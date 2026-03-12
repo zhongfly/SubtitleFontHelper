@@ -34,5 +34,7 @@ namespace sfh
 
 		RpcServer& operator=(const RpcServer&) = delete;
 		RpcServer& operator=(RpcServer&&) = delete;
+
+		void Start();
 	};
 }

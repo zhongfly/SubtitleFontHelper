@@ -7,6 +7,7 @@
 #include <Windows.h>
 #include <shellapi.h>
 #include <wil/win32_helpers.h>
+#include <wil/resource.h>
 
 class sfh::SystemTray::Implementation
 {
@@ -22,21 +23,25 @@ private:
 	std::atomic<size_t> m_checkPoint = 0;
 
 	std::atomic<bool> m_loading = true;
+	std::atomic<bool> m_exitRequested = false;
+	wil::unique_event m_startEvent;
 public:
 	Implementation(IDaemon* daemon)
 		: m_daemon(daemon)
 	{
+		m_startEvent.create(wil::EventOptions::ManualReset);
 		m_trayThread = std::thread([&]()
 		{
+			++m_checkPoint;
+			if (WaitForSingleObject(m_startEvent.get(), INFINITE) != WAIT_OBJECT_0 || m_exitRequested.load())
+				return;
 			try
 			{
 				SetupMessageWindow();
-				++m_checkPoint;
 				MessageLoop();
 			}
 			catch (...)
 			{
-				++m_checkPoint;
 				m_daemon->NotifyException(std::current_exception());
 			}
 		});
@@ -46,17 +51,26 @@ public:
 
 	~Implementation()
 	{
+		m_exitRequested = true;
+		m_startEvent.SetEvent();
 		if (m_trayThread.joinable())
 		{
-			PostMessageW(m_hWnd, WM_CLOSE, 0, 0);
+			if (m_hWnd != nullptr)
+				PostMessageW(m_hWnd, WM_CLOSE, 0, 0);
 			m_trayThread.join();
 		}
+	}
+
+	void Start()
+	{
+		m_startEvent.SetEvent();
 	}
 
 	void NotifyFinishLoad()
 	{
 		m_loading = false;
-		PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
+		if (m_hWnd != nullptr)
+			PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
 	}
 
 private:
@@ -215,6 +229,11 @@ sfh::SystemTray::SystemTray(IDaemon* daemon)
 }
 
 sfh::SystemTray::~SystemTray() = default;
+
+void sfh::SystemTray::Start()
+{
+	m_impl->Start();
+}
 
 void sfh::SystemTray::NotifyFinishLoad()
 {

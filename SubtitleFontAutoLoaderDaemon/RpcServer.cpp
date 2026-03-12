@@ -21,6 +21,7 @@ private:
 	std::thread m_listener;
 	std::atomic<size_t> m_checkPoint;
 	wil::unique_event m_exitEvent;
+	wil::unique_event m_startEvent;
 
 	std::vector<std::thread> m_workers;
 
@@ -354,6 +355,7 @@ public:
 		: m_daemon(daemon), m_requestHandler(requestHandler), m_feedbackHandler(feedbackHandler), m_checkPoint(0)
 	{
 		m_exitEvent.create(wil::EventOptions::ManualReset);
+		m_startEvent.create(wil::EventOptions::ManualReset);
 		m_iocp.reset(CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0));
 		if (!m_iocp.is_valid())
 		{
@@ -364,7 +366,7 @@ public:
 
 		SYSTEM_INFO info;
 		GetSystemInfo(&info);
-		int workerCount = info.dwNumberOfProcessors;
+		size_t workerCount = info.dwNumberOfProcessors;
 		if (workerCount > 8)
 			workerCount = 8;
 
@@ -373,6 +375,9 @@ public:
 		{
 			m_workers.emplace_back([this]()
 			{
+				++m_checkPoint;
+				if (WaitForSingleObject(m_startEvent.get(), INFINITE) != WAIT_OBJECT_0)
+					return;
 				try
 				{
 					IocpRoutine();
@@ -386,6 +391,9 @@ public:
 
 		m_listener = std::thread([this]()
 		{
+			++m_checkPoint;
+			if (WaitForSingleObject(m_startEvent.get(), INFINITE) != WAIT_OBJECT_0 || m_exitEvent.is_signaled())
+				return;
 			try
 			{
 				ListenProcedure();
@@ -396,13 +404,14 @@ public:
 			}
 		});
 
-		while (m_checkPoint.load() == 0)
+		while (m_checkPoint.load() < workerCount + 1)
 			std::this_thread::yield();
 	}
 
 	~Implementation()
 	{
 		m_exitEvent.SetEvent();
+		m_startEvent.SetEvent();
 		{
 			std::lock_guard lg(m_connectionMutex);
 			for (auto& connection : m_connections)
@@ -421,6 +430,11 @@ public:
 		}
 		if (m_listener.joinable())
 			m_listener.join();
+	}
+
+	void Start()
+	{
+		m_startEvent.SetEvent();
 	}
 
 private:
@@ -453,3 +467,8 @@ sfh::RpcServer::RpcServer(IDaemon* daemon, IRpcRequestHandler* requestHandler, I
 }
 
 sfh::RpcServer::~RpcServer() = default;
+
+void sfh::RpcServer::Start()
+{
+	m_impl->Start();
+}

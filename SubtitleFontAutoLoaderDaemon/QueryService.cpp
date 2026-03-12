@@ -311,7 +311,7 @@ public:
 		EventLog::GetInstance().LogDaemonBumpVersion(newValue - 1, newValue);
 	}
 
-	void Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs)
+	void Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, bool publishVersion)
 	{
 		QueryTrie<FontDatabase::FontFaceElement, true> win32FamilyName;
 		QueryTrie<FontDatabase::FontFaceElement, false> fullName;
@@ -356,6 +356,15 @@ public:
 		m_fullName = std::move(fullName);
 		m_postScriptName = std::move(postScriptName);
 		m_fontPriority = std::move(fontPriority);
+		if (publishVersion)
+		{
+			UpdateVerison();
+		}
+	}
+
+	void PublishVersion()
+	{
+		std::lock_guard lg(m_accessLock);
 		UpdateVerison();
 	}
 
@@ -491,9 +500,14 @@ sfh::QueryService::QueryService(IDaemon* daemon)
 
 sfh::QueryService::~QueryService() = default;
 
-void sfh::QueryService::Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs)
+void sfh::QueryService::Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, bool publishVersion)
 {
-	m_impl->Load(std::move(dbs));
+	m_impl->Load(std::move(dbs), publishVersion);
+}
+
+void sfh::QueryService::PublishVersion()
+{
+	m_impl->PublishVersion();
 }
 
 sfh::IRpcRequestHandler* sfh::QueryService::GetRpcRequestHandler()

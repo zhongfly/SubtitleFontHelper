@@ -20,6 +20,7 @@ namespace sfh
 		ProcessMonitor& operator=(const ProcessMonitor&) = delete;
 		ProcessMonitor& operator=(ProcessMonitor&&) = delete;
 
-		void SetMonitorList(std::vector<std::wstring>&& list);
+		void Start();
+		void SetOptions(std::vector<std::wstring>&& list, std::chrono::milliseconds interval);
 	};
 }

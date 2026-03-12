@@ -157,7 +157,7 @@ namespace sfh
 				TryShowToast(
 					L"Subtitle Font Helper",
 					L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
-				daemon->NotifyManagedIndexBuilt();
+				daemon->NotifyManagedIndexBuilt(task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{

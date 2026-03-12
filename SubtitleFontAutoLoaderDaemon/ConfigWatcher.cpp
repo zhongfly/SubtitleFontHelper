@@ -107,56 +107,69 @@ namespace
 class sfh::ConfigWatcher::Implementation
 {
 private:
-		struct WatchDirectory
-		{
-			std::filesystem::path m_path;
-			ChangeNotificationHandle m_handle;
-		};
+	struct WatchDirectory
+	{
+		std::filesystem::path m_path;
+		ChangeNotificationHandle m_handle;
+	};
 
-		struct WatchFile
-		{
-			std::filesystem::path m_path;
-			FileSnapshot m_snapshot;
-		};
+	struct WatchFile
+	{
+		std::filesystem::path m_path;
+		FileSnapshot m_snapshot;
+	};
 
-	std::vector<WatchDirectory> m_directories;
-	std::vector<WatchFile> m_files;
+	struct WatchShard
+	{
+		std::vector<WatchDirectory> m_directories;
+		std::vector<WatchFile> m_files;
+	};
+
+	std::vector<WatchShard> m_shards;
 	std::chrono::milliseconds m_debounce;
 	IDaemon* m_daemon;
 
 	wil::unique_event m_exitEvent;
-	std::thread m_worker;
-	std::atomic<bool> m_started = false;
+	std::vector<std::thread> m_workers;
+	std::atomic<size_t> m_startedWorkers = 0;
 
 	static constexpr DWORD WATCH_FILTER =
 		FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE;
+	static constexpr size_t MAX_DIRECTORIES_PER_SHARD = MAXIMUM_WAIT_OBJECTS - 1;
 public:
 	Implementation(IDaemon* daemon, std::vector<std::filesystem::path>&& files, std::chrono::milliseconds debounce)
 		: m_debounce(debounce), m_daemon(daemon)
 	{
 		m_exitEvent.create();
 		Initialize(std::move(files));
-		m_worker = std::thread([&]()
+		m_workers.reserve(m_shards.size());
+		for (auto& shard : m_shards)
 		{
-			try
+			m_workers.emplace_back([this, &shard]()
 			{
-				WorkerProcedure();
-			}
-			catch (...)
-			{
-				m_started = true;
-				m_daemon->NotifyException(std::current_exception());
-			}
-		});
-		while (!m_started.load())
+				++m_startedWorkers;
+				try
+				{
+					WorkerProcedure(shard);
+				}
+				catch (...)
+				{
+					m_daemon->NotifyException(std::current_exception());
+				}
+			});
+		}
+		while (m_startedWorkers.load() < m_workers.size())
 			std::this_thread::yield();
 	}
 
 	~Implementation()
 	{
 		m_exitEvent.SetEvent();
-		if (m_worker.joinable())
-			m_worker.join();
+		for (auto& worker : m_workers)
+		{
+			if (worker.joinable())
+				worker.join();
+		}
 	}
 
 private:
@@ -165,10 +178,14 @@ private:
 		for (auto& file : files)
 		{
 			auto normalized = std::filesystem::absolute(file).lexically_normal();
-			if (std::find_if(m_files.begin(), m_files.end(), [&](const WatchFile& watchFile)
+			const bool isDuplicateFile = std::ranges::any_of(m_shards, [&](const WatchShard& shard)
 			{
-				return watchFile.m_path == normalized;
-			}) != m_files.end())
+				return std::find_if(shard.m_files.begin(), shard.m_files.end(), [&](const WatchFile& watchFile)
+				{
+					return watchFile.m_path == normalized;
+				}) != shard.m_files.end();
+			});
+			if (isDuplicateFile)
 			{
 				continue;
 			}
@@ -177,25 +194,41 @@ private:
 			if (parentPath.empty())
 				throw std::logic_error("watch file must have parent path");
 
-			auto directory = std::find_if(m_directories.begin(), m_directories.end(), [&](const WatchDirectory& entry)
+			WatchShard* targetShard = nullptr;
+			for (auto& shard : m_shards)
 			{
-				return entry.m_path == parentPath;
-			});
-			if (directory == m_directories.end())
-			{
-				HANDLE handle = FindFirstChangeNotificationW(parentPath.c_str(), FALSE, WATCH_FILTER);
-				THROW_LAST_ERROR_IF(handle == INVALID_HANDLE_VALUE || handle == nullptr);
-				m_directories.emplace_back(parentPath, ChangeNotificationHandle(handle));
+				auto directory = std::find_if(shard.m_directories.begin(), shard.m_directories.end(),
+				                              [&](const WatchDirectory& entry)
+				{
+					return entry.m_path == parentPath;
+				});
+				if (directory != shard.m_directories.end())
+				{
+					targetShard = &shard;
+					break;
+				}
 			}
 
-			m_files.push_back({ normalized, CaptureSnapshot(normalized) });
+			if (targetShard == nullptr)
+			{
+				if (m_shards.empty() || m_shards.back().m_directories.size() >= MAX_DIRECTORIES_PER_SHARD)
+				{
+					m_shards.emplace_back();
+				}
+				targetShard = &m_shards.back();
+				HANDLE handle = FindFirstChangeNotificationW(parentPath.c_str(), FALSE, WATCH_FILTER);
+				THROW_LAST_ERROR_IF(handle == INVALID_HANDLE_VALUE || handle == nullptr);
+				targetShard->m_directories.push_back({ parentPath, ChangeNotificationHandle(handle) });
+			}
+
+			targetShard->m_files.push_back({ normalized, CaptureSnapshot(normalized) });
 		}
 	}
 
-	bool RefreshWatchedFiles()
+	bool RefreshWatchedFiles(WatchShard& shard)
 	{
 		bool changed = false;
-		for (auto& file : m_files)
+		for (auto& file : shard.m_files)
 		{
 			auto newSnapshot = CaptureSnapshot(file.m_path);
 			if (!(newSnapshot == file.m_snapshot))
@@ -207,18 +240,17 @@ private:
 		return changed;
 	}
 
-	void WorkerProcedure()
+	void WorkerProcedure(WatchShard& shard)
 	{
 		std::vector<HANDLE> waitList;
-		waitList.reserve(m_directories.size() + 1);
+		waitList.reserve(shard.m_directories.size() + 1);
 		waitList.push_back(m_exitEvent.get());
-		for (auto& directory : m_directories)
+		for (auto& directory : shard.m_directories)
 		{
 			waitList.push_back(directory.m_handle.get());
 		}
 
 		std::optional<std::chrono::steady_clock::time_point> debounceDeadline;
-		m_started = true;
 		while (true)
 		{
 			DWORD timeout = INFINITE;
@@ -240,7 +272,7 @@ private:
 				return;
 			if (waitResult == WAIT_TIMEOUT)
 			{
-				if (debounceDeadline.has_value() && RefreshWatchedFiles())
+				if (debounceDeadline.has_value() && RefreshWatchedFiles(shard))
 					m_daemon->NotifyReload();
 				debounceDeadline.reset();
 				continue;
@@ -248,7 +280,7 @@ private:
 			if (waitResult >= WAIT_OBJECT_0 + 1 && waitResult < WAIT_OBJECT_0 + waitList.size())
 			{
 				auto index = waitResult - WAIT_OBJECT_0 - 1;
-				THROW_LAST_ERROR_IF(FindNextChangeNotification(m_directories[index].m_handle.get()) == FALSE);
+				THROW_LAST_ERROR_IF(FindNextChangeNotification(shard.m_directories[index].m_handle.get()) == FALSE);
 				debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
 				continue;
 			}

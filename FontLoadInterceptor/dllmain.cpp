@@ -5,6 +5,7 @@
 #include "EventLog.h"
 
 #include <clocale>
+#include <atomic>
 
 #include <wil/win32_helpers.h>
 
@@ -13,8 +14,8 @@
 
 DWORD WINAPI DelayedAttach(LPVOID lpThreadParameter);
 
-DWORD attachThreadId = 0;
-bool detourAttached = false;
+std::atomic<DWORD> attachThreadId = 0;
+std::atomic<bool> detourAttached = false;
 
 HMODULE LoadDll(const char* name)
 {
@@ -70,18 +71,17 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 			}
 			break;
 		case DLL_THREAD_ATTACH:
-			if (attachThreadId == GetCurrentThreadId())
+			if (attachThreadId.load() == GetCurrentThreadId())
 			{
 				if (!sfh::AttachDetour())
 					return FALSE;
-				detourAttached = true;
-				sfh::EventLog::GetInstance().LogDllAttach(GetCurrentProcessId());
+				detourAttached.store(true);
 			}
 			break;
 		case DLL_THREAD_DETACH:
 			break;
 		case DLL_PROCESS_DETACH:
-			if (lpReserved == nullptr && detourAttached && sfh::IsDetourNeeded())
+			if (lpReserved == nullptr && detourAttached.load() && sfh::IsDetourNeeded())
 			{
 				sfh::DetachDetour();
 			}
@@ -113,16 +113,23 @@ DWORD WINAPI DelayedAttach(LPVOID lpThreadParameter)
 	// check required dll
 	sfh::Detour::LoadFunctionPointers();
 	// create thread to acquire loader lock
+	DWORD newAttachThreadId = 0;
 	wil::unique_handle hThread(CreateThread(
 		nullptr,
 		0,
 		DummyThread,
 		nullptr,
 		CREATE_SUSPENDED,
-		&attachThreadId));
+		&newAttachThreadId));
 	if (!hThread.is_valid())
 		return 1;
+	attachThreadId.store(newAttachThreadId);
 	ResumeThread(hThread.get());
+	WaitForSingleObject(hThread.get(), INFINITE);
+	if (detourAttached.load())
+	{
+		sfh::EventLog::GetInstance().LogDllAttach(GetCurrentProcessId());
+	}
 	return 0;
 }
 

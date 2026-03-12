@@ -1375,23 +1375,6 @@ namespace sfh
 	}
 }
 
-void sfh::ConfigFile::WriteToFile(const std::wstring& path, const ConfigFile& config)
-{
-	auto com = wil::CoInitializeEx();
-
-	wil::com_ptr<IStream> stream;
-	THROW_IF_FAILED(
-		SHCreateStreamOnFileEx(
-			path.c_str(),
-			STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE,
-			FILE_ATTRIBUTE_NORMAL,
-			TRUE,
-			nullptr,
-			stream.put()));
-
-	auto document = ConfigFileToDocument(config);
-	WriteDocumentToFile(stream, document);
-}
 
 void sfh::FontDatabase::WriteToFile(const std::wstring& path, const FontDatabase& db)
 {

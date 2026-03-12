@@ -30,7 +30,6 @@ namespace sfh
 		std::vector<MonitorProcessElement> m_monitorProcess;
 
 		static std::unique_ptr<ConfigFile> ReadFromFile(const std::wstring& path);
-		static void WriteToFile(const std::wstring& path, const ConfigFile& config);
 	};
 
 

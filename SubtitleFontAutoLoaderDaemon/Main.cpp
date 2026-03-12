@@ -290,37 +290,62 @@ namespace sfh
 				auto indexPath = std::filesystem::absolute(indexFile.m_path).lexically_normal();
 				const bool isManagedIndex = IsManagedIndex(indexFile);
 				newService->m_indexSlots.push_back({ indexPath, isManagedIndex });
+
+				ManagedIndexBuilder::Task managedTask;
+				ManagedIndexWatcher::Options watchOptions;
+				bool managedIndexNeedsBuild = false;
 				if (isManagedIndex)
 				{
 					auto sourceFolders = ResolveSourceFolders(indexFile);
-					ManagedIndexBuilder::Task managedTask;
 					managedTask.m_indexPath = indexPath;
 					managedTask.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
 					managedTask.m_sourceFolders = sourceFolders;
-
-					ManagedIndexWatcher::Options watchOptions;
 					watchOptions.m_workerCount = managedBuildWorkerCount;
 
 					std::error_code ec;
-					if (!std::filesystem::exists(indexPath, ec) || ec)
+					managedIndexNeedsBuild = !std::filesystem::exists(indexPath, ec) || ec;
+				}
+				else
+				{
+					watchFiles.emplace_back(indexPath);
+				}
+
+				if (!managedIndexNeedsBuild)
+				{
+					try
 					{
-						managedTask.m_buildInProgress = std::make_shared<std::atomic<bool>>(true);
-						watchOptions.m_task = managedTask;
-						watchOptions.m_skipInitialSync = true;
-						managedIndexBuildTasks.push_back(std::move(managedTask));
-						managedIndexWatchOptions.push_back(std::move(watchOptions));
-						continue;
+						dbs.emplace_back(ReadWithRetry([&]()
+						{
+							return FontDatabase::ReadFromFile(indexPath);
+						}));
 					}
-					watchOptions.m_task = std::move(managedTask);
-					managedIndexWatchOptions.push_back(std::move(watchOptions));
+					catch (...)
+					{
+						if (!isManagedIndex)
+						{
+							throw;
+						}
+						managedIndexNeedsBuild = true;
+					}
 				}
 
 				if (!isManagedIndex)
-					watchFiles.emplace_back(indexPath);
-				dbs.emplace_back(ReadWithRetry([&]()
 				{
-					return FontDatabase::ReadFromFile(indexPath);
-				}));
+					continue;
+				}
+
+				if (managedIndexNeedsBuild)
+				{
+					managedTask.m_buildInProgress = std::make_shared<std::atomic<bool>>(true);
+					watchOptions.m_task = managedTask;
+					watchOptions.m_skipInitialSync = true;
+					managedIndexBuildTasks.push_back(std::move(managedTask));
+					managedIndexWatchOptions.push_back(std::move(watchOptions));
+					continue;
+				}
+
+				watchOptions.m_task = std::move(managedTask);
+				managedIndexWatchOptions.push_back(std::move(watchOptions));
 			}
 			newService->m_prefetch = std::make_unique<Prefetch>(this, cfg->lruSize, lruCachePath);
 			newService->m_queryService = std::make_unique<QueryService>(this);

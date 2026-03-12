@@ -17,6 +17,12 @@ namespace FontIndexCore
 	{
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x314E5350484653ULL;
 		constexpr uint32_t SNAPSHOT_VERSION = 1;
+		constexpr uint64_t MAX_SNAPSHOT_ENTRY_COUNT = 1000000;
+		constexpr uint32_t MAX_SNAPSHOT_PATH_BYTES = 1024 * 1024;
+		constexpr uint8_t SNAPSHOT_FLAG_HAS_CONTENT_HASH = 0x1;
+		constexpr uint64_t SNAPSHOT_ENTRY_BASE_SIZE =
+			sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint8_t);
+		constexpr uint64_t SNAPSHOT_CONTENT_HASH_SIZE = sizeof(uint64_t) + sizeof(uint64_t);
 
 		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
 		{
@@ -138,6 +144,34 @@ namespace FontIndexCore
 			}
 			return value;
 		}
+
+		uint64_t GetStreamSize(std::ifstream& stream)
+		{
+			stream.seekg(0, std::ios::end);
+			const auto end = stream.tellg();
+			if (end < 0)
+			{
+				throw std::runtime_error("failed to determine snapshot size");
+			}
+			stream.seekg(0, std::ios::beg);
+			if (!stream)
+			{
+				throw std::runtime_error("failed to seek snapshot");
+			}
+			return static_cast<uint64_t>(end);
+		}
+
+		template <typename T>
+		T ReadScalar(std::ifstream& stream, uint64_t& remainingBytes)
+		{
+			if (remainingBytes < sizeof(T))
+			{
+				throw std::runtime_error("snapshot is truncated");
+			}
+			auto value = ReadScalar<T>(stream);
+			remainingBytes -= sizeof(T);
+			return value;
+		}
 	}
 
 	std::filesystem::path GetDirectorySnapshotPath(const std::filesystem::path& indexPath)
@@ -191,46 +225,75 @@ namespace FontIndexCore
 		{
 			throw std::runtime_error("failed to open snapshot");
 		}
+		auto remainingBytes = GetStreamSize(stream);
 
-		if (ReadScalar<uint64_t>(stream) != SNAPSHOT_MAGIC)
+		if (ReadScalar<uint64_t>(stream, remainingBytes) != SNAPSHOT_MAGIC)
 		{
 			throw std::runtime_error("invalid snapshot header");
 		}
-		if (ReadScalar<uint32_t>(stream) != SNAPSHOT_VERSION)
+		if (ReadScalar<uint32_t>(stream, remainingBytes) != SNAPSHOT_VERSION)
 		{
 			throw std::runtime_error("unsupported snapshot version");
 		}
 
 		DirectorySnapshot snapshot;
-		const auto count = ReadScalar<uint64_t>(stream);
+		const auto count = ReadScalar<uint64_t>(stream, remainingBytes);
+		if (count > MAX_SNAPSHOT_ENTRY_COUNT)
+		{
+			throw std::runtime_error("snapshot entry count is too large");
+		}
+		if (count > remainingBytes / SNAPSHOT_ENTRY_BASE_SIZE)
+		{
+			throw std::runtime_error("snapshot entry count exceeds remaining data");
+		}
 		snapshot.m_files.reserve(static_cast<size_t>(count));
 		for (uint64_t i = 0; i < count; ++i)
 		{
-			const auto pathLength = ReadScalar<uint32_t>(stream);
+			const auto pathLength = ReadScalar<uint32_t>(stream, remainingBytes);
+			if (pathLength > MAX_SNAPSHOT_PATH_BYTES)
+			{
+				throw std::runtime_error("snapshot path is too large");
+			}
+			if (remainingBytes < static_cast<uint64_t>(pathLength))
+			{
+				throw std::runtime_error("snapshot path length exceeds remaining data");
+			}
 			std::string utf8Path(pathLength, '\0');
-			stream.read(utf8Path.data(), pathLength);
+			stream.read(utf8Path.data(), static_cast<std::streamsize>(pathLength));
 			if (!stream)
 			{
 				throw std::runtime_error("failed to read snapshot path");
 			}
+			remainingBytes -= pathLength;
 
 			DirectorySnapshotEntry entry;
 			entry.m_path = Utf8ToWide(utf8Path);
-			entry.m_fileSize = ReadScalar<uint64_t>(stream);
-			entry.m_lastWriteTime = ReadScalar<uint64_t>(stream);
-			const auto flags = ReadScalar<uint8_t>(stream);
-			entry.m_hasContentHash = (flags & 0x1) != 0;
+			entry.m_fileSize = ReadScalar<uint64_t>(stream, remainingBytes);
+			entry.m_lastWriteTime = ReadScalar<uint64_t>(stream, remainingBytes);
+			const auto flags = ReadScalar<uint8_t>(stream, remainingBytes);
+			if ((flags & ~SNAPSHOT_FLAG_HAS_CONTENT_HASH) != 0)
+			{
+				throw std::runtime_error("snapshot contains unsupported flags");
+			}
+			entry.m_hasContentHash = (flags & SNAPSHOT_FLAG_HAS_CONTENT_HASH) != 0;
 			if (entry.m_hasContentHash)
 			{
-				entry.m_contentHash.m_low64 = ReadScalar<uint64_t>(stream);
-				entry.m_contentHash.m_high64 = ReadScalar<uint64_t>(stream);
+				if (remainingBytes < SNAPSHOT_CONTENT_HASH_SIZE)
+				{
+					throw std::runtime_error("snapshot content hash exceeds remaining data");
+				}
+				entry.m_contentHash.m_low64 = ReadScalar<uint64_t>(stream, remainingBytes);
+				entry.m_contentHash.m_high64 = ReadScalar<uint64_t>(stream, remainingBytes);
 			}
 			snapshot.m_files.push_back(std::move(entry));
+		}
+		if (remainingBytes != 0)
+		{
+			throw std::runtime_error("snapshot has unexpected trailing bytes");
 		}
 
 		return snapshot;
 	}
-
 	void WriteDirectorySnapshot(const std::filesystem::path& snapshotPath, const DirectorySnapshot& snapshot)
 	{
 		const auto parent = snapshotPath.parent_path();
@@ -248,10 +311,18 @@ namespace FontIndexCore
 
 		WriteScalar(stream, SNAPSHOT_MAGIC);
 		WriteScalar(stream, SNAPSHOT_VERSION);
+		if (snapshot.m_files.size() > MAX_SNAPSHOT_ENTRY_COUNT)
+		{
+			throw std::runtime_error("snapshot entry count is too large");
+		}
 		WriteScalar(stream, static_cast<uint64_t>(snapshot.m_files.size()));
 		for (const auto& entry : snapshot.m_files)
 		{
 			const auto utf8Path = WideToUtf8(entry.m_path.wstring());
+			if (utf8Path.size() > MAX_SNAPSHOT_PATH_BYTES)
+			{
+				throw std::runtime_error("snapshot path is too large");
+			}
 			WriteScalar(stream, static_cast<uint32_t>(utf8Path.size()));
 			stream.write(utf8Path.data(), static_cast<std::streamsize>(utf8Path.size()));
 			if (!stream)
@@ -260,7 +331,7 @@ namespace FontIndexCore
 			}
 			WriteScalar(stream, entry.m_fileSize);
 			WriteScalar(stream, entry.m_lastWriteTime);
-			WriteScalar(stream, static_cast<uint8_t>(entry.m_hasContentHash ? 0x1 : 0x0));
+			WriteScalar(stream, static_cast<uint8_t>(entry.m_hasContentHash ? SNAPSHOT_FLAG_HAS_CONTENT_HASH : 0x0));
 			if (entry.m_hasContentHash)
 			{
 				WriteScalar(stream, entry.m_contentHash.m_low64);

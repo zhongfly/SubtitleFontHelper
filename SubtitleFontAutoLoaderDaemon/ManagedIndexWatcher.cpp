@@ -13,6 +13,7 @@
 #include <optional>
 #include <algorithm>
 #include <cwctype>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <wil/resource.h>
@@ -21,6 +22,9 @@ namespace sfh
 {
 	namespace
 	{
+		constexpr uint64_t SNAPSHOT_MAGIC = 0x314E5350484653ULL;
+		constexpr uint32_t LEGACY_SNAPSHOT_VERSION = 1;
+
 		constexpr DWORD WATCH_FILTER =
 			FILE_NOTIFY_CHANGE_FILE_NAME
 			| FILE_NOTIFY_CHANGE_DIR_NAME
@@ -242,6 +246,7 @@ namespace sfh
 
 		FontIndexCore::DirectorySnapshot m_lastSnapshot;
 		bool m_hasLastSnapshot = false;
+		bool m_shouldUpgradePersistedSnapshot = false;
 
 		FontDatabase m_database;
 		bool m_hasDatabase = false;
@@ -393,6 +398,42 @@ namespace sfh
 			catch (...)
 			{
 				return false;
+			}
+		}
+
+		bool IsLegacyPersistedSnapshot() const
+		{
+			std::ifstream stream(m_task.m_snapshotPath, std::ios::binary);
+			if (!stream)
+			{
+				return false;
+			}
+
+			uint64_t magic = 0;
+			stream.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+			if (!stream || magic != SNAPSHOT_MAGIC)
+			{
+				return false;
+			}
+
+			uint32_t version = 0;
+			stream.read(reinterpret_cast<char*>(&version), sizeof(version));
+			if (!stream)
+			{
+				return false;
+			}
+
+			return version == LEGACY_SNAPSHOT_VERSION;
+		}
+
+		void TryUpgradePersistedSnapshot(const FontIndexCore::DirectorySnapshot& snapshot) const
+		{
+			try
+			{
+				FontIndexCore::WriteDirectorySnapshot(m_task.m_snapshotPath, snapshot);
+			}
+			catch (...)
+			{
 			}
 		}
 
@@ -646,6 +687,8 @@ namespace sfh
 			auto currentSnapshot = CaptureSnapshot(stopToken);
 			FontIndexCore::DirectorySnapshot persistedSnapshot;
 			const bool hasPersistedSnapshot = TryReadPersistedSnapshot(persistedSnapshot);
+			const bool shouldUpgradePersistedSnapshot =
+				hasPersistedSnapshot && IsLegacyPersistedSnapshot();
 			if (hasPersistedSnapshot)
 			{
 				ApplyCachedHashes(persistedSnapshot, currentSnapshot);
@@ -663,6 +706,7 @@ namespace sfh
 				EnsureLoadedDatabase();
 				m_lastSnapshot = std::move(currentSnapshot);
 				m_hasLastSnapshot = true;
+				m_shouldUpgradePersistedSnapshot = shouldUpgradePersistedSnapshot;
 				return;
 			}
 
@@ -681,6 +725,11 @@ namespace sfh
 			for (auto& watch : m_folderWatches)
 			{
 				QueueRead(watch);
+			}
+			if (m_shouldUpgradePersistedSnapshot)
+			{
+				TryUpgradePersistedSnapshot(m_lastSnapshot);
+				m_shouldUpgradePersistedSnapshot = false;
 			}
 
 			std::vector<HANDLE> waitHandles;

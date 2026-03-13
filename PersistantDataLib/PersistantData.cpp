@@ -113,6 +113,30 @@ namespace
 		return std::string(value.substr(begin, end - begin));
 	}
 
+	std::filesystem::path ResolvePersistedPath(
+		const std::filesystem::path& rawPath,
+		const std::filesystem::path& baseDirectory)
+	{
+		if (rawPath.empty())
+			return {};
+		if (rawPath.has_root_name() || rawPath.has_root_directory())
+			return std::filesystem::absolute(rawPath).lexically_normal();
+		return std::filesystem::absolute(baseDirectory / rawPath).lexically_normal();
+	}
+
+	void ResolveTomlConfigPaths(sfh::ConfigFile& config, const std::filesystem::path& configPath)
+	{
+		const auto baseDirectory = std::filesystem::path(configPath).parent_path();
+		for (auto& indexFile : config.m_indexFile)
+		{
+			indexFile.m_path = ResolvePersistedPath(indexFile.m_path, baseDirectory).wstring();
+			for (auto& sourceFolder : indexFile.m_sourceFolders)
+			{
+				sourceFolder = ResolvePersistedPath(sourceFolder, baseDirectory).wstring();
+			}
+		}
+	}
+
 	class TomlConfigParser
 	{
 	private:
@@ -1246,7 +1270,11 @@ std::unique_ptr<sfh::ConfigFile> sfh::ConfigFile::ReadFromFile(const std::wstrin
 {
 	auto extension = std::filesystem::path(path).extension().wstring();
 	if (_wcsicmp(extension.c_str(), L".toml") == 0)
-		return ReadTomlConfigFromFile(path);
+	{
+		auto config = ReadTomlConfigFromFile(path);
+		ResolveTomlConfigPaths(*config, path);
+		return config;
+	}
 	return ReadXmlConfigFromFile(path);
 }
 

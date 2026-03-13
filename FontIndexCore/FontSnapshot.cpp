@@ -16,7 +16,8 @@ namespace FontIndexCore
 	namespace
 	{
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x314E5350484653ULL;
-		constexpr uint32_t SNAPSHOT_VERSION = 1;
+		constexpr uint32_t LEGACY_SNAPSHOT_VERSION = 1;
+		constexpr uint32_t SNAPSHOT_VERSION = 2;
 		constexpr uint64_t MAX_SNAPSHOT_ENTRY_COUNT = 1000000;
 		constexpr uint32_t MAX_SNAPSHOT_PATH_BYTES = 1024 * 1024;
 		constexpr uint8_t SNAPSHOT_FLAG_HAS_CONTENT_HASH = 0x1;
@@ -43,6 +44,46 @@ namespace FontIndexCore
 				result.pop_back();
 			}
 			return result;
+		}
+
+		std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
+		{
+			const auto baseDirectory = persistedPath.parent_path();
+			if (baseDirectory.empty())
+			{
+				return NormalizePath(std::filesystem::current_path());
+			}
+			return NormalizePath(baseDirectory);
+		}
+
+		std::filesystem::path ResolvePersistedPath(
+			const std::filesystem::path& rawPath,
+			const std::filesystem::path& baseDirectory)
+		{
+			if (rawPath.empty())
+			{
+				return {};
+			}
+			if (rawPath.has_root_name() || rawPath.has_root_directory())
+			{
+				return NormalizePath(rawPath);
+			}
+			return NormalizePath(baseDirectory / rawPath);
+		}
+
+		std::filesystem::path MakePersistedPath(
+			const std::filesystem::path& rawPath,
+			const std::filesystem::path& baseDirectory)
+		{
+			auto absolutePath = ResolvePersistedPath(rawPath, baseDirectory);
+			auto relativePath = absolutePath.lexically_relative(baseDirectory);
+			if (!relativePath.empty()
+				&& !relativePath.has_root_name()
+				&& !relativePath.has_root_directory())
+			{
+				return relativePath.lexically_normal();
+			}
+			return absolutePath;
 		}
 
 		std::string WideToUtf8(const std::wstring& value)
@@ -231,12 +272,14 @@ namespace FontIndexCore
 		{
 			throw std::runtime_error("invalid snapshot header");
 		}
-		if (ReadScalar<uint32_t>(stream, remainingBytes) != SNAPSHOT_VERSION)
+		const auto version = ReadScalar<uint32_t>(stream, remainingBytes);
+		if (version != LEGACY_SNAPSHOT_VERSION && version != SNAPSHOT_VERSION)
 		{
 			throw std::runtime_error("unsupported snapshot version");
 		}
 
 		DirectorySnapshot snapshot;
+		const auto baseDirectory = GetPersistedBaseDirectory(snapshotPath);
 		const auto count = ReadScalar<uint64_t>(stream, remainingBytes);
 		if (count > MAX_SNAPSHOT_ENTRY_COUNT)
 		{
@@ -267,7 +310,7 @@ namespace FontIndexCore
 			remainingBytes -= pathLength;
 
 			DirectorySnapshotEntry entry;
-			entry.m_path = Utf8ToWide(utf8Path);
+			entry.m_path = ResolvePersistedPath(Utf8ToWide(utf8Path), baseDirectory);
 			entry.m_fileSize = ReadScalar<uint64_t>(stream, remainingBytes);
 			entry.m_lastWriteTime = ReadScalar<uint64_t>(stream, remainingBytes);
 			const auto flags = ReadScalar<uint8_t>(stream, remainingBytes);
@@ -302,6 +345,7 @@ namespace FontIndexCore
 			std::filesystem::create_directories(parent);
 		}
 
+		const auto baseDirectory = GetPersistedBaseDirectory(snapshotPath);
 		const auto tempPath = snapshotPath.wstring() + L".tmp";
 		std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
 		if (!stream)
@@ -318,7 +362,8 @@ namespace FontIndexCore
 		WriteScalar(stream, static_cast<uint64_t>(snapshot.m_files.size()));
 		for (const auto& entry : snapshot.m_files)
 		{
-			const auto utf8Path = WideToUtf8(entry.m_path.wstring());
+			const auto persistedPath = MakePersistedPath(entry.m_path, baseDirectory);
+			const auto utf8Path = WideToUtf8(persistedPath.wstring());
 			if (utf8Path.size() > MAX_SNAPSHOT_PATH_BYTES)
 			{
 				throw std::runtime_error("snapshot path is too large");

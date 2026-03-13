@@ -6,7 +6,7 @@ monitor_processes = [
 ]
 
 [[index_files]]
-path = 'E:\超级字体整合包 XZ\FontIndex.xml'
+path = 'indexes/FontIndex.xml'
 source_folders = [
-	'E:\超级字体整合包 XZ',
+	'fonts',
 ]

@@ -36,14 +36,20 @@ monitor_processes = [
 ]
 
 [[index_files]]
-path = 'E:\超级字体整合包 XZ\FontIndex.xml'
+path = 'indexes/FontIndex.xml'
+source_folders = [
+  'fonts',
+]
 ```
 
- - TOML 中推荐使用 `wmi_poll_interval`、`lru_size`、`monitor_processes` 和 `[[index_files]]` / `path`。
+ - TOML 中推荐使用 `wmi_poll_interval`、`lru_size`、`monitor_processes`、`[[index_files]].path` 和 `source_folders`。
  - `SubtitleFontHelper.toml` 只要存在就会被优先读取；只有在该文件不存在时才会回退到 `SubtitleFontHelper.xml`。
+ - TOML 里的 `[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。
  - `wmiPollInterval` / `wmi_poll_interval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
  - `lruSize` / `lru_size` 指定服务启动时预加载的条目最大大小。
- - XML 的 `IndexFile` 元素和 TOML 的 `[[index_files]].path` 都用于指定索引文件位置。
+ - 索引 XML 的 `FontFace/@path` 会在可行时写成相对索引文件目录的路径；daemon 读取后会统一解析成绝对路径。
+ - managed index 的 `.state.bin` 快照会在可行时写成相对快照文件目录的路径；当前写出版本为 v2，读取仍兼容 v1。
+ - XML 的 `IndexFile` 元素和 TOML 的 `[[index_files]].path` 都用于指定索引文件位置；旧 XML 配置不在这次相对路径增强范围内。
  - `MonitorProcess` / `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
  - XML 仅用于兼容旧版本配置；新配置不再提供 XML 示例。
  - XML 中未被程序使用的额外属性或元素会被忽略，便于与外部工具共享同一份配置文件；TOML 中**当前支持类型**的未知键也会被忽略。

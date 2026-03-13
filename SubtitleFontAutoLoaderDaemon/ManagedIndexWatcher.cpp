@@ -12,6 +12,7 @@
 
 #include <optional>
 #include <algorithm>
+#include <cwctype>
 #include <unordered_map>
 #include <unordered_set>
 #include <wil/resource.h>
@@ -30,6 +31,18 @@ namespace sfh
 		std::wstring GetDisplayName(const std::filesystem::path& path)
 		{
 			return path.filename().empty() ? path.wstring() : path.filename().wstring();
+		}
+
+		std::wstring MakePathKey(const std::filesystem::path& path)
+		{
+			std::wstring key = path.wstring();
+			std::transform(key.begin(), key.end(), key.begin(), towlower);
+			return key;
+		}
+
+		bool HasSamePath(const std::filesystem::path& lhs, const std::filesystem::path& rhs)
+		{
+			return MakePathKey(lhs) == MakePathKey(rhs);
 		}
 
 		constexpr size_t TOAST_FILE_NAME_LIMIT = 3;
@@ -149,7 +162,7 @@ namespace sfh
 			{
 				const auto& left = lhs.m_files[i];
 				const auto& right = rhs.m_files[i];
-				if (left.m_path != right.m_path
+				if (!HasSamePath(left.m_path, right.m_path)
 					|| left.m_fileSize != right.m_fileSize
 					|| left.m_lastWriteTime != right.m_lastWriteTime
 					|| left.m_hasContentHash != right.m_hasContentHash
@@ -166,7 +179,7 @@ namespace sfh
 			const FontIndexCore::DirectorySnapshotEntry& lhs,
 			const FontIndexCore::DirectorySnapshotEntry& rhs)
 		{
-			return lhs.m_path == rhs.m_path
+			return HasSamePath(lhs.m_path, rhs.m_path)
 				&& lhs.m_fileSize == rhs.m_fileSize
 				&& lhs.m_lastWriteTime == rhs.m_lastWriteTime;
 		}
@@ -176,7 +189,7 @@ namespace sfh
 			std::unordered_set<std::wstring> paths;
 			for (const auto& font : db.m_fonts)
 			{
-				paths.insert(font.m_path);
+				paths.insert(MakePathKey(font.m_path));
 			}
 			return paths;
 		}
@@ -190,7 +203,7 @@ namespace sfh
 			for (const auto index : group)
 			{
 				const auto& entry = snapshot.m_files[index];
-				const auto key = entry.m_path.wstring();
+				const auto key = MakePathKey(entry.m_path);
 				const auto oldEntry = oldEntries.find(key);
 				if (!indexedPaths.contains(key) || oldEntry == oldEntries.end())
 				{
@@ -391,12 +404,12 @@ namespace sfh
 			oldEntries.reserve(oldSnapshot.m_files.size());
 			for (const auto& entry : oldSnapshot.m_files)
 			{
-				oldEntries.emplace(entry.m_path.wstring(), &entry);
+				oldEntries.emplace(MakePathKey(entry.m_path), &entry);
 			}
 
 			for (auto& entry : newSnapshot.m_files)
 			{
-				const auto oldEntry = oldEntries.find(entry.m_path.wstring());
+				const auto oldEntry = oldEntries.find(MakePathKey(entry.m_path));
 				if (oldEntry == oldEntries.end())
 				{
 					continue;
@@ -492,44 +505,47 @@ namespace sfh
 				{
 					for (const auto& entry : m_lastSnapshot.m_files)
 					{
-						oldEntries.emplace(entry.m_path.wstring(), &entry);
+						oldEntries.emplace(MakePathKey(entry.m_path), &entry);
 					}
 				}
 
 				std::unordered_set<std::wstring> currentPaths;
 				currentPaths.reserve(newSnapshot.m_files.size());
-				std::unordered_set<std::wstring> changedPaths;
-				changedPaths.reserve(newSnapshot.m_files.size());
+				std::unordered_set<std::wstring> changedPathKeys;
+				changedPathKeys.reserve(newSnapshot.m_files.size());
 				std::unordered_set<std::wstring> addedPaths;
 				addedPaths.reserve(newSnapshot.m_files.size());
 				std::unordered_set<std::wstring> modifiedPaths;
 				modifiedPaths.reserve(newSnapshot.m_files.size());
 				for (const auto& entry : newSnapshot.m_files)
 				{
-					const auto key = entry.m_path.wstring();
+					const auto key = MakePathKey(entry.m_path);
 					currentPaths.insert(key);
 					const auto oldEntry = oldEntries.find(key);
 					if (oldEntry == oldEntries.end())
 					{
-						changedPaths.insert(key);
-						addedPaths.insert(key);
+						changedPathKeys.insert(key);
+						addedPaths.insert(entry.m_path.wstring());
 					}
 					else if (!HasSameMetadata(*oldEntry->second, entry))
 					{
-						changedPaths.insert(key);
-						modifiedPaths.insert(key);
+						changedPathKeys.insert(key);
+						modifiedPaths.insert(entry.m_path.wstring());
 					}
 				}
 
 				std::unordered_set<std::wstring> removedPaths;
 				removedPaths.reserve(oldEntries.size());
+				std::unordered_set<std::wstring> removedPathKeys;
+				removedPathKeys.reserve(oldEntries.size());
 				if (m_hasLastSnapshot)
 				{
 					for (const auto& [path, entry] : oldEntries)
 					{
 						if (!currentPaths.contains(path))
 						{
-							removedPaths.insert(path);
+							removedPathKeys.insert(path);
+							removedPaths.insert(entry->m_path.wstring());
 						}
 					}
 				}
@@ -546,32 +562,32 @@ namespace sfh
 						m_indexedPaths,
 						oldEntries);
 					const auto& canonicalPath = newSnapshot.m_files[canonicalIndex].m_path;
-					const auto key = canonicalPath.wstring();
+					const auto key = MakePathKey(canonicalPath);
 					newCanonicalPaths.insert(key);
-					if (changedPaths.contains(key) || !m_indexedPaths.contains(key))
+					if (changedPathKeys.contains(key) || !m_indexedPaths.contains(key))
 					{
 						pathsToAnalyze.push_back(canonicalPath);
 					}
 				}
 
-				std::unordered_set<std::wstring> pathsToRemove = removedPaths;
-				for (const auto& path : changedPaths)
+				std::unordered_set<std::wstring> pathsToRemoveKeys = removedPathKeys;
+				for (const auto& path : changedPathKeys)
 				{
-					pathsToRemove.insert(path);
+					pathsToRemoveKeys.insert(path);
 				}
 				for (const auto& path : m_indexedPaths)
 				{
 					if (!newCanonicalPaths.contains(path))
 					{
-						pathsToRemove.insert(path);
+						pathsToRemoveKeys.insert(path);
 					}
 				}
 
-				if (!pathsToRemove.empty())
+				if (!pathsToRemoveKeys.empty())
 				{
 					std::erase_if(m_database.m_fonts, [&](const FontDatabase::FontFaceElement& font)
 					{
-						return pathsToRemove.contains(font.m_path);
+						return pathsToRemoveKeys.contains(MakePathKey(font.m_path));
 					});
 				}
 

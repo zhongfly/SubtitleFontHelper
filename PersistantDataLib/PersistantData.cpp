@@ -124,9 +124,32 @@ namespace
 		return std::filesystem::absolute(baseDirectory / rawPath).lexically_normal();
 	}
 
+	std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
+	{
+		const auto baseDirectory = persistedPath.parent_path();
+		if (baseDirectory.empty())
+			return std::filesystem::current_path().lexically_normal();
+		return std::filesystem::absolute(baseDirectory).lexically_normal();
+	}
+
+	std::filesystem::path MakePersistedPath(
+		const std::filesystem::path& rawPath,
+		const std::filesystem::path& baseDirectory)
+	{
+		auto absolutePath = ResolvePersistedPath(rawPath, baseDirectory);
+		auto relativePath = absolutePath.lexically_relative(baseDirectory);
+		if (!relativePath.empty()
+			&& !relativePath.has_root_name()
+			&& !relativePath.has_root_directory())
+		{
+			return relativePath.lexically_normal();
+		}
+		return absolutePath;
+	}
+
 	void ResolveTomlConfigPaths(sfh::ConfigFile& config, const std::filesystem::path& configPath)
 	{
-		const auto baseDirectory = std::filesystem::path(configPath).parent_path();
+		const auto baseDirectory = GetPersistedBaseDirectory(configPath);
 		for (auto& indexFile : config.m_indexFile)
 		{
 			indexFile.m_path = ResolvePersistedPath(indexFile.m_path, baseDirectory).wstring();
@@ -134,6 +157,15 @@ namespace
 			{
 				sourceFolder = ResolvePersistedPath(sourceFolder, baseDirectory).wstring();
 			}
+		}
+	}
+
+	void ResolveFontDatabasePaths(sfh::FontDatabase& db, const std::filesystem::path& databasePath)
+	{
+		const auto baseDirectory = GetPersistedBaseDirectory(databasePath);
+		for (auto& font : db.m_fonts)
+		{
+			font.m_path = ResolvePersistedPath(font.m_path, baseDirectory).wstring();
 		}
 	}
 
@@ -1299,7 +1331,9 @@ std::unique_ptr<sfh::FontDatabase> sfh::FontDatabase::ReadFromFile(const std::ws
 	THROW_IF_FAILED(saxReader->putContentHandler(handler.get()));
 	THROW_IF_FAILED_MSG(saxReader->parse(pathVariant), "BAD FONTDATABASE: %ws", path.c_str());
 
-	return handler->GetFontDatabase();
+	auto db = handler->GetFontDatabase();
+	ResolveFontDatabasePaths(*db, path);
+	return db;
 }
 
 namespace sfh
@@ -1360,9 +1394,10 @@ namespace sfh
 		return document;
 	}
 
-	wil::com_ptr<IXMLDOMDocument> FontDatabaseToDocument(const FontDatabase& db)
+	wil::com_ptr<IXMLDOMDocument> FontDatabaseToDocument(const FontDatabase& db, const std::filesystem::path& path)
 	{
 		auto document = wil::CoCreateInstance<IXMLDOMDocument>(CLSID_DOMDocument30);
+		const auto baseDirectory = GetPersistedBaseDirectory(path);
 
 		wil::com_ptr<IXMLDOMElement> rootElement;
 		THROW_IF_FAILED(document->createElement(wil::make_bstr(L"FontDatabase").get(), rootElement.put()));
@@ -1374,7 +1409,8 @@ namespace sfh
 
 			wil::unique_variant value;
 
-			InitVariantFromString(font.m_path.c_str(), value.reset_and_addressof());
+			auto persistedPath = MakePersistedPath(font.m_path, baseDirectory);
+			InitVariantFromString(persistedPath.c_str(), value.reset_and_addressof());
 			THROW_IF_FAILED(fontfaceElement->setAttribute(wil::make_bstr(L"path").get(), value));
 			InitVariantFromString(std::to_wstring(font.m_index).c_str(), value.reset_and_addressof());
 			THROW_IF_FAILED(fontfaceElement->setAttribute(wil::make_bstr(L"index").get(), value));
@@ -1418,6 +1454,6 @@ void sfh::FontDatabase::WriteToFile(const std::wstring& path, const FontDatabase
 			nullptr,
 			stream.put()));
 
-	auto document = FontDatabaseToDocument(db);
+	auto document = FontDatabaseToDocument(db, path);
 	WriteDocumentToFile(stream, document);
 }

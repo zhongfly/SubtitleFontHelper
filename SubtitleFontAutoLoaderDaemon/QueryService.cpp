@@ -8,6 +8,7 @@
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 #include <unordered_map>
+#include <string_view>
 #include <set>
 
 namespace
@@ -237,7 +238,7 @@ namespace
 					for (size_t i = 0; i < top.node->m_data.size(); ++i)
 					{
 						wchar_t head = (i == top.node->m_data.size() - 1 && top.node->m_branch.empty()) ? L'└' : L'├';
-						stream << prefix << head << L" [" << top.node->m_data[i]->m_path << L"]\n";
+						stream << prefix << head << L" [" << top.node->m_data[i]->m_path.Get() << L"]\n";
 					}
 				}
 				if (top.nextArc == top.node->m_branch.size())
@@ -463,11 +464,11 @@ public:
 	}
 
 	static void AppendFontFace(FontQueryResponse& response, const std::vector<FontDatabase::FontFaceElement*>& faces,
-	                           std::vector<std::pair<const wchar_t*, uint32_t>>& dedup)
+	                           std::vector<std::pair<std::wstring_view, uint32_t>>& dedup)
 	{
 		for (auto face : faces)
 		{
-			auto unique = std::make_pair(face->m_path.c_str(), face->m_index);
+			auto unique = std::make_pair(std::wstring_view(face->m_path.Get()), face->m_index);
 			if (std::find(dedup.begin(), dedup.end(), unique) != dedup.end())
 				continue;
 			dedup.push_back(unique);
@@ -487,7 +488,7 @@ public:
 					break;
 				}
 			}
-			font->set_path(WideToUtf8String(face->m_path));
+			font->set_path(WideToUtf8String(face->m_path.Get()));
 			font->set_weight(face->m_weight);
 			font->set_oblique(face->m_oblique);
 			font->set_ispsoutline(face->m_psOutline);
@@ -503,7 +504,7 @@ public:
 		// enable truncated query for GDI LOGFONT::lfFaceName's 31 wchar_t limit
 		if (queryString.size() == 31)
 			doTruncated = true;
-		std::vector<std::pair<const wchar_t*, uint32_t>> dedup;
+		std::vector<std::pair<std::wstring_view, uint32_t>> dedup;
 
 		ret.set_version(1);
 

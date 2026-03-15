@@ -33,6 +33,39 @@ namespace sfh
 	};
 
 
+	class SharedPath
+	{
+	private:
+		std::shared_ptr<const std::wstring> m_value;
+
+		static const std::wstring& Empty()
+		{
+			static const std::wstring s_empty;
+			return s_empty;
+		}
+
+	public:
+		SharedPath() = default;
+		SharedPath(const wchar_t* value) : m_value(value && *value ? std::make_shared<const std::wstring>(value) : nullptr) {}
+		SharedPath(const std::wstring& value) : m_value(value.empty() ? nullptr : std::make_shared<const std::wstring>(value)) {}
+		SharedPath(std::wstring&& value) : m_value(value.empty() ? nullptr : std::make_shared<const std::wstring>(std::move(value))) {}
+
+		SharedPath& operator=(const wchar_t* value) { m_value = (value && *value) ? std::make_shared<const std::wstring>(value) : nullptr; return *this; }
+		SharedPath& operator=(const std::wstring& value) { m_value = value.empty() ? nullptr : std::make_shared<const std::wstring>(value); return *this; }
+		SharedPath& operator=(std::wstring&& value) { m_value = value.empty() ? nullptr : std::make_shared<const std::wstring>(std::move(value)); return *this; }
+
+		void assign(const wchar_t* value, size_t length) { m_value = (length == 0) ? nullptr : std::make_shared<const std::wstring>(value, length); }
+
+		const std::wstring& Get() const { return m_value ? *m_value : Empty(); }
+		operator const std::wstring&() const { return Get(); }
+		const wchar_t* c_str() const { return Get().c_str(); }
+		bool empty() const { return !m_value || m_value->empty(); }
+		std::wstring wstring() const { return Get(); }
+
+		void SetShared(std::shared_ptr<const std::wstring> ptr) { m_value = std::move(ptr); }
+	};
+
+
 	struct FontDatabase
 	{
 		struct FontFaceElement
@@ -78,7 +111,7 @@ namespace sfh
 			};
 
 			// attribute
-			std::wstring m_path;
+			SharedPath m_path;
 			uint32_t m_index = std::numeric_limits<uint32_t>::max();
 			uint32_t m_weight;
 			uint32_t m_oblique;
@@ -88,6 +121,8 @@ namespace sfh
 		};
 
 		std::vector<FontFaceElement> m_fonts;
+
+		void DeduplicatePaths();
 
 		static std::unique_ptr<FontDatabase> ReadFromFile(const std::wstring& path);
 		static void WriteToFile(const std::wstring& path, const FontDatabase& db);

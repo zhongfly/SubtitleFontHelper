@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 
 #include <Windows.h>
@@ -165,8 +166,9 @@ namespace
 		const auto baseDirectory = GetPersistedBaseDirectory(databasePath);
 		for (auto& font : db.m_fonts)
 		{
-			font.m_path = ResolvePersistedPath(font.m_path, baseDirectory).wstring();
+			font.m_path = ResolvePersistedPath(font.m_path.Get(), baseDirectory).wstring();
 		}
+		db.DeduplicatePaths();
 	}
 
 	class TomlConfigParser
@@ -1111,6 +1113,18 @@ namespace
 		}
 
 		template <typename T, size_t N>
+		HRESULT RetrieveAttribute(ISAXAttributes* pAttributes, T& ptr, sfh::SharedPath T::* mptr, const wchar_t (&name)[N])
+		{
+			const wchar_t* attrValue;
+			int attrLength;
+			assert(mptr != nullptr);
+			assert(pAttributes != nullptr);
+			RETURN_HR_IF(E_FAIL, FAILED(pAttributes->getValueFromName(L"", 0, name, N - 1, &attrValue, &attrLength)));
+			(ptr.*mptr).assign(attrValue, static_cast<size_t>(attrLength));
+			return S_OK;
+		}
+
+		template <typename T, size_t N>
 		HRESULT RetrieveAttribute(ISAXAttributes* pAttributes, T& ptr, uint32_t T::* mptr, const wchar_t (&name)[N])
 		{
 			const wchar_t* attrValue;
@@ -1298,6 +1312,29 @@ namespace
 	};
 }
 
+void sfh::FontDatabase::DeduplicatePaths()
+{
+	std::unordered_map<std::wstring_view, std::shared_ptr<const std::wstring>> pool;
+	pool.reserve(m_fonts.size());
+	for (auto& font : m_fonts)
+	{
+		const auto& path = font.m_path.Get();
+		if (path.empty())
+			continue;
+		auto it = pool.find(std::wstring_view(path));
+		if (it != pool.end())
+		{
+			font.m_path.SetShared(it->second);
+		}
+		else
+		{
+			auto shared = std::make_shared<const std::wstring>(path);
+			pool.emplace(std::wstring_view(*shared), shared);
+			font.m_path.SetShared(std::move(shared));
+		}
+	}
+}
+
 std::unique_ptr<sfh::ConfigFile> sfh::ConfigFile::ReadFromFile(const std::wstring& path)
 {
 	auto extension = std::filesystem::path(path).extension().wstring();
@@ -1409,7 +1446,7 @@ namespace sfh
 
 			wil::unique_variant value;
 
-			auto persistedPath = MakePersistedPath(font.m_path, baseDirectory);
+			auto persistedPath = MakePersistedPath(font.m_path.Get(), baseDirectory);
 			InitVariantFromString(persistedPath.c_str(), value.reset_and_addressof());
 			THROW_IF_FAILED(fontfaceElement->setAttribute(wil::make_bstr(L"path").get(), value));
 			InitVariantFromString(std::to_wstring(font.m_index).c_str(), value.reset_and_addressof());

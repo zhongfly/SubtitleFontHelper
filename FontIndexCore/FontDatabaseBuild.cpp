@@ -370,6 +370,7 @@ namespace FontIndexCore
 		}
 
 		ThrowIfCancelled(isCancelled);
+		db.DeduplicatePaths();
 		return db;
 	}
 }

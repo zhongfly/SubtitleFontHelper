@@ -193,7 +193,7 @@ namespace sfh
 			std::unordered_set<std::wstring> paths;
 			for (const auto& font : db.m_fonts)
 			{
-				paths.insert(MakePathKey(font.m_path));
+				paths.insert(MakePathKey(font.m_path.Get()));
 			}
 			return paths;
 		}
@@ -820,7 +820,7 @@ namespace sfh
 				{
 					std::erase_if(m_database.m_fonts, [&](const FontDatabase::FontFaceElement& font)
 					{
-						return pathsToRemoveKeys.contains(MakePathKey(font.m_path));
+						return pathsToRemoveKeys.contains(MakePathKey(font.m_path.Get()));
 					});
 				}
 
@@ -845,6 +845,7 @@ namespace sfh
 						m_database.m_fonts.end(),
 						std::make_move_iterator(analyzed.m_fonts.begin()),
 						std::make_move_iterator(analyzed.m_fonts.end()));
+					m_database.DeduplicatePaths();
 				}
 
 				ThrowIfCancelled(isCancelled);

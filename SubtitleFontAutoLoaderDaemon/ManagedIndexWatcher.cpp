@@ -263,6 +263,14 @@ namespace sfh
 					return lhs.m_path < rhs.m_path;
 				});
 		}
+
+		enum class SnapshotChangeStatus { Unchanged, Changed, FullRescan };
+
+		struct TargetedSnapshotResult
+		{
+			FontIndexCore::DirectorySnapshot snapshot;
+			SnapshotChangeStatus status;
+		};
 	}
 
 	class ManagedIndexWatcher::Implementation
@@ -427,18 +435,24 @@ namespace sfh
 			pending.RequireFullRescan();
 		}
 
-		FontIndexCore::DirectorySnapshot BuildTargetedSnapshot(
+		TargetedSnapshotResult BuildTargetedSnapshot(
 			const std::stop_token& stopToken,
 			const PendingSnapshotChanges& pending)
 		{
 			if (!m_hasLastSnapshot || pending.m_requiresFullRescan)
-				return CaptureSnapshot(stopToken);
+				return { CaptureSnapshot(stopToken), SnapshotChangeStatus::FullRescan };
 
 			if (pending.m_changedPaths.empty())
-				return m_lastSnapshot;
+				return { m_lastSnapshot, SnapshotChangeStatus::Unchanged };
 
 			auto isCancelled = [&]() { return stopToken.stop_requested(); };
 
+			std::unordered_map<std::wstring, const FontIndexCore::DirectorySnapshotEntry*> oldEntryMap;
+			oldEntryMap.reserve(m_lastSnapshot.m_files.size());
+			for (const auto& entry : m_lastSnapshot.m_files)
+				oldEntryMap.emplace(MakePathKey(entry.m_path), &entry);
+
+			bool changed = false;
 			FontIndexCore::DirectorySnapshot snapshot;
 			snapshot.m_files.reserve(m_lastSnapshot.m_files.size() + pending.m_changedPaths.size());
 
@@ -452,12 +466,27 @@ namespace sfh
 			{
 				ThrowIfCancelled(isCancelled);
 				FontIndexCore::DirectorySnapshotEntry updated{};
-				if (FontIndexCore::TryCaptureDirectorySnapshotEntry(path, updated))
+				const bool captured = FontIndexCore::TryCaptureDirectorySnapshotEntry(path, updated);
+				const auto oldIt = oldEntryMap.find(key);
+				const bool existed = oldIt != oldEntryMap.end();
+
+				if (captured && existed && HasSameMetadata(*oldIt->second, updated))
+				{
+					snapshot.m_files.push_back(*oldIt->second);
+				}
+				else if (captured)
+				{
 					snapshot.m_files.push_back(std::move(updated));
+					changed = true;
+				}
+				else if (existed)
+				{
+					changed = true;
+				}
 			}
 
 			SortSnapshot(snapshot);
-			return snapshot;
+			return { std::move(snapshot), changed ? SnapshotChangeStatus::Changed : SnapshotChangeStatus::Unchanged };
 		}
 
 		bool IsExternalBuildInProgress() const
@@ -935,14 +964,19 @@ namespace sfh
 							debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
 							continue;
 						}
-						auto newSnapshot = BuildTargetedSnapshot(stopToken, pendingChanges);
-						if (m_hasLastSnapshot)
+						auto result = BuildTargetedSnapshot(stopToken, pendingChanges);
+						if (result.status == SnapshotChangeStatus::Changed)
 						{
-							ApplyCachedHashes(m_lastSnapshot, newSnapshot);
+							if (m_hasLastSnapshot)
+								ApplyCachedHashes(m_lastSnapshot, result.snapshot);
+							RunIncrementalSync(stopToken, std::move(result.snapshot));
 						}
-						if (!m_hasLastSnapshot || !AreSnapshotsEqual(m_lastSnapshot, newSnapshot))
+						else if (result.status == SnapshotChangeStatus::FullRescan)
 						{
-							RunIncrementalSync(stopToken, std::move(newSnapshot));
+							if (m_hasLastSnapshot)
+								ApplyCachedHashes(m_lastSnapshot, result.snapshot);
+							if (!m_hasLastSnapshot || !AreSnapshotsEqual(m_lastSnapshot, result.snapshot))
+								RunIncrementalSync(stopToken, std::move(result.snapshot));
 						}
 					}
 					pendingChanges.Reset();

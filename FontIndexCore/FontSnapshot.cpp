@@ -33,19 +33,6 @@ namespace FontIndexCore
 			}
 		}
 
-		std::wstring NormalizePath(const std::filesystem::path& path)
-		{
-			DWORD length = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
-			THROW_LAST_ERROR_IF(length == 0);
-			std::wstring result(length, L'\0');
-			THROW_LAST_ERROR_IF(GetFullPathNameW(path.c_str(), length, result.data(), nullptr) == 0);
-			while (!result.empty() && result.back() == L'\0')
-			{
-				result.pop_back();
-			}
-			return result;
-		}
-
 		std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
 		{
 			const auto baseDirectory = persistedPath.parent_path();
@@ -151,6 +138,10 @@ namespace FontIndexCore
 			{
 				return false;
 			}
+			if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+			{
+				return false;
+			}
 
 			ULARGE_INTEGER sizeValue{};
 			sizeValue.HighPart = data.nFileSizeHigh;
@@ -215,6 +206,37 @@ namespace FontIndexCore
 		}
 	}
 
+	std::filesystem::path NormalizePath(const std::filesystem::path& path)
+	{
+		DWORD length = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+		THROW_LAST_ERROR_IF(length == 0);
+		std::wstring result(length, L'\0');
+		THROW_LAST_ERROR_IF(GetFullPathNameW(path.c_str(), length, result.data(), nullptr) == 0);
+		while (!result.empty() && result.back() == L'\0')
+		{
+			result.pop_back();
+		}
+		return result;
+	}
+
+	bool TryCaptureDirectorySnapshotEntry(const std::filesystem::path& path, DirectorySnapshotEntry& entry)
+	{
+		if (!IsSupportedFontFile(path))
+		{
+			return false;
+		}
+		uint64_t fileSize = 0;
+		uint64_t lastWriteTime = 0;
+		if (!TryGetFileMetadata(path, fileSize, lastWriteTime))
+		{
+			return false;
+		}
+		entry.m_path = NormalizePath(path);
+		entry.m_fileSize = fileSize;
+		entry.m_lastWriteTime = lastWriteTime;
+		return true;
+	}
+
 	std::filesystem::path GetDirectorySnapshotPath(const std::filesystem::path& indexPath)
 	{
 		return indexPath.wstring() + L".state.bin";
@@ -232,17 +254,11 @@ namespace FontIndexCore
 		{
 			ThrowIfCancelled(isCancelled);
 
-			uint64_t fileSize = 0;
-			uint64_t lastWriteTime = 0;
-			if (!TryGetFileMetadata(file.m_path, fileSize, lastWriteTime))
+			DirectorySnapshotEntry entry{};
+			if (!TryCaptureDirectorySnapshotEntry(file.m_path, entry))
 			{
 				continue;
 			}
-
-			DirectorySnapshotEntry entry;
-			entry.m_path = NormalizePath(file.m_path);
-			entry.m_fileSize = fileSize;
-			entry.m_lastWriteTime = lastWriteTime;
 			snapshot.m_files.push_back(std::move(entry));
 		}
 

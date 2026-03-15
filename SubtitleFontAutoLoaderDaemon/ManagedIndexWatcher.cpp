@@ -220,6 +220,49 @@ namespace sfh
 			}
 			return group.front();
 		}
+
+		const DWORD FILE_NOTIFY_INFORMATION_HEADER_SIZE =
+			static_cast<DWORD>(FIELD_OFFSET(FILE_NOTIFY_INFORMATION, FileName));
+
+		struct PendingSnapshotChanges
+		{
+			std::unordered_map<std::wstring, std::filesystem::path> m_changedPaths;
+			bool m_requiresFullRescan = false;
+
+			bool HasPendingWork() const
+			{
+				return m_requiresFullRescan || !m_changedPaths.empty();
+			}
+
+			void MarkChangedPath(std::filesystem::path path)
+			{
+				if (m_requiresFullRescan)
+					return;
+				m_changedPaths.insert_or_assign(MakePathKey(path), std::move(path));
+			}
+
+			void RequireFullRescan()
+			{
+				m_changedPaths.clear();
+				m_requiresFullRescan = true;
+			}
+
+			void Reset()
+			{
+				m_changedPaths.clear();
+				m_requiresFullRescan = false;
+			}
+		};
+
+		void SortSnapshot(FontIndexCore::DirectorySnapshot& snapshot)
+		{
+			std::sort(snapshot.m_files.begin(), snapshot.m_files.end(),
+				[](const FontIndexCore::DirectorySnapshotEntry& lhs,
+					const FontIndexCore::DirectorySnapshotEntry& rhs)
+				{
+					return lhs.m_path < rhs.m_path;
+				});
+		}
 	}
 
 	class ManagedIndexWatcher::Implementation
@@ -292,9 +335,129 @@ namespace sfh
 		}
 
 	private:
-		static std::filesystem::path NormalizePath(const std::filesystem::path& path)
+		bool IsDirectoryLevelChange(const std::filesystem::path& path) const
 		{
-			return std::filesystem::absolute(path).lexically_normal();
+			const auto attributes = GetFileAttributesW(path.c_str());
+			if (attributes == INVALID_FILE_ATTRIBUTES)
+				return true;
+			return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+		}
+
+		std::filesystem::path BuildNotificationPath(
+			const FolderWatch& watch,
+			const FILE_NOTIFY_INFORMATION& notification) const
+		{
+			const auto charCount = notification.FileNameLength / sizeof(WCHAR);
+			std::wstring relativeName(notification.FileName, charCount);
+			return FontIndexCore::NormalizePath(watch.m_path / relativeName);
+		}
+
+		void AccumulateNotification(
+			const FolderWatch& watch,
+			const FILE_NOTIFY_INFORMATION& notification,
+			PendingSnapshotChanges& pending) const
+		{
+			switch (notification.Action)
+			{
+			case FILE_ACTION_ADDED:
+			case FILE_ACTION_REMOVED:
+			case FILE_ACTION_MODIFIED:
+			case FILE_ACTION_RENAMED_OLD_NAME:
+			case FILE_ACTION_RENAMED_NEW_NAME:
+				break;
+			default:
+				pending.RequireFullRescan();
+				return;
+			}
+
+			if (notification.FileNameLength == 0
+				|| (notification.FileNameLength % sizeof(WCHAR)) != 0)
+			{
+				pending.RequireFullRescan();
+				return;
+			}
+
+			const auto path = BuildNotificationPath(watch, notification);
+			if (IsDirectoryLevelChange(path))
+			{
+				pending.RequireFullRescan();
+				return;
+			}
+			pending.MarkChangedPath(path);
+		}
+
+		void AccumulateNotificationBuffer(
+			const FolderWatch& watch,
+			DWORD transferredBytes,
+			PendingSnapshotChanges& pending) const
+		{
+			if (pending.m_requiresFullRescan)
+				return;
+			if (transferredBytes < FILE_NOTIFY_INFORMATION_HEADER_SIZE)
+			{
+				pending.RequireFullRescan();
+				return;
+			}
+
+			const auto* current = reinterpret_cast<const std::byte*>(watch.m_buffer.data());
+			DWORD remaining = transferredBytes;
+			while (remaining >= FILE_NOTIFY_INFORMATION_HEADER_SIZE)
+			{
+				const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(current);
+				const DWORD recordSize = info->NextEntryOffset == 0
+					? remaining
+					: info->NextEntryOffset;
+				if (recordSize < FILE_NOTIFY_INFORMATION_HEADER_SIZE
+					|| recordSize > remaining
+					|| info->FileNameLength > recordSize - FILE_NOTIFY_INFORMATION_HEADER_SIZE)
+				{
+					pending.RequireFullRescan();
+					return;
+				}
+
+				AccumulateNotification(watch, *info, pending);
+				if (pending.m_requiresFullRescan)
+					return;
+
+				if (info->NextEntryOffset == 0)
+					return;
+				current += info->NextEntryOffset;
+				remaining -= info->NextEntryOffset;
+			}
+			pending.RequireFullRescan();
+		}
+
+		FontIndexCore::DirectorySnapshot BuildTargetedSnapshot(
+			const std::stop_token& stopToken,
+			const PendingSnapshotChanges& pending)
+		{
+			if (!m_hasLastSnapshot || pending.m_requiresFullRescan)
+				return CaptureSnapshot(stopToken);
+
+			if (pending.m_changedPaths.empty())
+				return m_lastSnapshot;
+
+			auto isCancelled = [&]() { return stopToken.stop_requested(); };
+
+			FontIndexCore::DirectorySnapshot snapshot;
+			snapshot.m_files.reserve(m_lastSnapshot.m_files.size() + pending.m_changedPaths.size());
+
+			for (const auto& entry : m_lastSnapshot.m_files)
+			{
+				if (!pending.m_changedPaths.contains(MakePathKey(entry.m_path)))
+					snapshot.m_files.push_back(entry);
+			}
+
+			for (const auto& [key, path] : pending.m_changedPaths)
+			{
+				ThrowIfCancelled(isCancelled);
+				FontIndexCore::DirectorySnapshotEntry updated{};
+				if (FontIndexCore::TryCaptureDirectorySnapshotEntry(path, updated))
+					snapshot.m_files.push_back(std::move(updated));
+			}
+
+			SortSnapshot(snapshot);
+			return snapshot;
 		}
 
 		bool IsExternalBuildInProgress() const
@@ -337,7 +500,7 @@ namespace sfh
 			std::unordered_set<std::wstring> seenPaths;
 			for (const auto& sourceFolder : m_task.m_sourceFolders)
 			{
-				auto normalized = NormalizePath(sourceFolder);
+				auto normalized = FontIndexCore::NormalizePath(sourceFolder);
 				const auto key = normalized.wstring();
 				if (!seenPaths.insert(key).second)
 				{
@@ -740,7 +903,7 @@ namespace sfh
 				waitHandles.push_back(watch.m_event.get());
 			}
 
-			bool pendingSync = false;
+			PendingSnapshotChanges pendingChanges;
 			std::optional<std::chrono::steady_clock::time_point> debounceDeadline;
 			while (!stopToken.stop_requested())
 			{
@@ -765,14 +928,14 @@ namespace sfh
 				}
 				if (waitResult == WAIT_TIMEOUT)
 				{
-					if (pendingSync)
+					if (pendingChanges.HasPendingWork())
 					{
 						if (IsExternalBuildInProgress())
 						{
 							debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
 							continue;
 						}
-						auto newSnapshot = CaptureSnapshot(stopToken);
+						auto newSnapshot = BuildTargetedSnapshot(stopToken, pendingChanges);
 						if (m_hasLastSnapshot)
 						{
 							ApplyCachedHashes(m_lastSnapshot, newSnapshot);
@@ -782,17 +945,19 @@ namespace sfh
 							RunIncrementalSync(stopToken, std::move(newSnapshot));
 						}
 					}
-					pendingSync = false;
+					pendingChanges.Reset();
 					debounceDeadline.reset();
 					continue;
 				}
 				if (waitResult >= WAIT_OBJECT_0 + 1 && waitResult < WAIT_OBJECT_0 + waitHandles.size())
 				{
 					const auto index = waitResult - WAIT_OBJECT_0 - 1;
+					auto& watch = m_folderWatches[index];
 					DWORD transferredBytes = 0;
+					bool requiresFullRescan = false;
 					if (!GetOverlappedResult(
-						m_folderWatches[index].m_handle.get(),
-						&m_folderWatches[index].m_overlapped,
+						watch.m_handle.get(),
+						&watch.m_overlapped,
 						&transferredBytes,
 						FALSE))
 					{
@@ -801,13 +966,33 @@ namespace sfh
 						{
 							return;
 						}
-						if (error != ERROR_NOTIFY_ENUM_DIR)
+						if (error == ERROR_NOTIFY_ENUM_DIR)
+						{
+							requiresFullRescan = true;
+						}
+						else
 						{
 							THROW_WIN32(error);
 						}
 					}
-					QueueRead(m_folderWatches[index]);
-					pendingSync = true;
+					else if (transferredBytes == 0)
+					{
+						requiresFullRescan = true;
+					}
+
+					if (requiresFullRescan)
+					{
+						pendingChanges.RequireFullRescan();
+					}
+					else
+					{
+						AccumulateNotificationBuffer(watch, transferredBytes, pendingChanges);
+					}
+
+					if (!QueueRead(watch))
+					{
+						pendingChanges.RequireFullRescan();
+					}
 					debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
 					continue;
 				}

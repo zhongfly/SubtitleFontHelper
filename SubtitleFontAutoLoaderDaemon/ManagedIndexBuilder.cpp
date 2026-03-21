@@ -3,6 +3,7 @@
 #include "ManagedIndexBuilder.h"
 
 #include "Common.h"
+#include "EventLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
 #include "../FontIndexCore/FontIndexCore.h"
@@ -16,6 +17,65 @@ namespace sfh
 {
 	namespace
 	{
+		std::wstring JoinPaths(const std::vector<std::filesystem::path>& paths)
+		{
+			if (paths.empty())
+				return {};
+
+			std::wstring result;
+			for (size_t i = 0; i < paths.size(); ++i)
+			{
+				if (i != 0)
+				{
+					result += L"; ";
+				}
+				result += paths[i].wstring();
+			}
+			return result;
+		}
+
+		void TryLogManagedIndexBuildStart(const ManagedIndexBuilder::Task& task)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build start: index=\"%ls\" sources=[%ls]",
+					task.m_indexPath.c_str(),
+					JoinPaths(task.m_sourceFolders).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexBuildComplete(const ManagedIndexBuilder::Task& task, size_t fontFileCount)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build complete: index=\"%ls\" fontFileCount=%zu",
+					task.m_indexPath.c_str(),
+					fontFileCount);
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexBuildFailure(const ManagedIndexBuilder::Task& task, const std::exception& e)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build failed: index=\"%ls\" error=\"%ls\"",
+					task.m_indexPath.c_str(),
+					Utf8ToWideString(e.what()).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
 		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
 		{
 			if (isCancelled && isCancelled())
@@ -144,6 +204,7 @@ namespace sfh
 				}
 			});
 			TryShowToast(L"Subtitle Font Helper", L"开始建立索引：" + indexName);
+			TryLogManagedIndexBuildStart(task);
 
 			try
 			{
@@ -157,10 +218,12 @@ namespace sfh
 				TryShowToast(
 					L"Subtitle Font Helper",
 					L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
+				TryLogManagedIndexBuildComplete(task, fontFileCount);
 				daemon->NotifyManagedIndexBuilt(task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{
+				TryLogManagedIndexBuildFailure(task, e);
 				if (!stopToken.stop_requested())
 				{
 					TryShowToast(

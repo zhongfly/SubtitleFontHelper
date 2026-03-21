@@ -31,6 +31,43 @@ namespace sfh
 
 	namespace
 	{
+		std::wstring JoinPaths(const std::vector<std::filesystem::path>& paths)
+		{
+			if (paths.empty())
+				return {};
+
+			std::wstring result;
+			for (size_t i = 0; i < paths.size(); ++i)
+			{
+				if (i != 0)
+				{
+					result += L"; ";
+				}
+				result += paths[i].wstring();
+			}
+			return result;
+		}
+
+		void TryLogManagedIndexConfiguration(
+			const std::filesystem::path& configPath,
+			const std::filesystem::path& indexPath,
+			const std::vector<std::filesystem::path>& sourceFolders,
+			bool needsBuild)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index config: config=\"%ls\" index=\"%ls\" sources=[%ls] action=%ls",
+					configPath.c_str(),
+					indexPath.c_str(),
+					JoinPaths(sourceFolders).c_str(),
+					needsBuild ? L"build" : L"load");
+			}
+			catch (...)
+			{
+			}
+		}
+
 		size_t GetDefaultWorkerCount()
 		{
 			auto concurrency = std::thread::hardware_concurrency();
@@ -485,6 +522,7 @@ namespace sfh
 
 					std::error_code ec;
 					managedIndexNeedsBuild = !std::filesystem::exists(indexPath, ec) || ec;
+					TryLogManagedIndexConfiguration(configPath, indexPath, sourceFolders, managedIndexNeedsBuild);
 				}
 				else
 				{

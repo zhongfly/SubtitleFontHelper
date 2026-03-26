@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
@@ -91,7 +92,18 @@ namespace FontIndexCore
 			SfntPrototype,
 		};
 
-		constexpr FontParserBackend kDefaultFontParserBackend = FontParserBackend::FreeType;
+		constexpr FontParserBackend kDefaultFontParserBackend = FontParserBackend::SfntPrototype;
+
+		std::atomic<size_t> g_fontParserFallbackCount = 0;
+
+		void RecordFontParserFallback(const wchar_t* path)
+		{
+			g_fontParserFallbackCount.fetch_add(1, std::memory_order_relaxed);
+			std::wstring message = L"SFH font parser fallback: ";
+			message += path;
+			message += L"\n";
+			OutputDebugStringW(message.c_str());
+		}
 
 		class FontAnalyzer final : public Internal::FontFileParser
 		{
@@ -297,10 +309,24 @@ namespace FontIndexCore
 				}
 			}
 
-			std::unique_ptr<Internal::FontFileParser> m_impl;
+			static std::unique_ptr<Internal::FontFileParser> CreateFallbackParser(FontParserBackend backend)
+			{
+				switch (backend)
+				{
+				case FontParserBackend::SfntPrototype:
+					return CreateFreeTypeParser();
+				case FontParserBackend::FreeType:
+				default:
+					return {};
+				}
+			}
+
+			std::unique_ptr<Internal::FontFileParser> m_primaryParser;
+			std::unique_ptr<Internal::FontFileParser> m_fallbackParser;
 		public:
 			FontAnalyzer()
-				: m_impl(CreateParser(kDefaultFontParserBackend))
+				: m_primaryParser(CreateParser(kDefaultFontParserBackend)),
+				  m_fallbackParser(CreateFallbackParser(kDefaultFontParserBackend))
 			{
 			}
 
@@ -314,7 +340,19 @@ namespace FontIndexCore
 
 			std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) override
 			{
-				return m_impl->AnalyzeFontFile(path);
+				try
+				{
+					return m_primaryParser->AnalyzeFontFile(path);
+				}
+				catch (const std::exception&)
+				{
+					if (!m_fallbackParser)
+					{
+						throw;
+					}
+					RecordFontParserFallback(path);
+					return m_fallbackParser->AnalyzeFontFile(path);
+				}
 			}
 		};
 	}
@@ -328,6 +366,8 @@ namespace FontIndexCore
 	{
 		sfh::FontDatabase db;
 		db.m_fonts.reserve(fontFiles.size());
+
+		g_fontParserFallbackCount.store(0, std::memory_order_relaxed);
 
 		if (fontFiles.empty())
 		{
@@ -394,6 +434,15 @@ namespace FontIndexCore
 			{
 				worker.join();
 			}
+		}
+
+		const auto fallbackCount = g_fontParserFallbackCount.load(std::memory_order_relaxed);
+		if (fallbackCount != 0)
+		{
+			std::string message = "SFH font parser fallback count: ";
+			message += std::to_string(fallbackCount);
+			message += "\n";
+			OutputDebugStringA(message.c_str());
 		}
 
 		ThrowIfCancelled(isCancelled);

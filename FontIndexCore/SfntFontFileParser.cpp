@@ -610,7 +610,6 @@ namespace
 				const bool isItalic = ComputeItalic(mapping.Data(), mapping.Size(), directory, os2, headTable);
 
 				sfh::FontDatabase::FontFaceElement faceElement;
-				faceElement.m_path = path;
 				faceElement.m_index = static_cast<uint32_t>(faceIndex);
 				faceElement.m_weight = ComputeWeight(os2, isBold);
 				faceElement.m_oblique = isItalic ? 1u : 0u;

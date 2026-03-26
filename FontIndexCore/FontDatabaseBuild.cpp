@@ -19,7 +19,9 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 
@@ -224,7 +226,6 @@ namespace FontIndexCore
 					for (int faceIndex = 0; faceIndex < faceCount; ++faceIndex)
 					{
 						sfh::FontDatabase::FontFaceElement faceElement;
-						faceElement.m_path = path;
 						faceElement.m_index = faceIndex;
 
 						if (FT_New_Memory_Face(
@@ -395,6 +396,39 @@ namespace FontIndexCore
 			batches.push_back({ batchBeginIndex, fontFiles.size() });
 			return batches;
 		}
+
+		using SharedPathPool = std::unordered_map<std::wstring_view, std::shared_ptr<const std::wstring>>;
+
+		std::shared_ptr<const std::wstring> InternPath(
+			const std::filesystem::path& path,
+			SharedPathPool& pool)
+		{
+			const auto& nativePath = path.native();
+			if (nativePath.empty())
+			{
+				return {};
+			}
+
+			auto it = pool.find(std::wstring_view(nativePath));
+			if (it != pool.end())
+			{
+				return it->second;
+			}
+
+			auto sharedPath = std::make_shared<const std::wstring>(nativePath);
+			pool.emplace(std::wstring_view(*sharedPath), sharedPath);
+			return sharedPath;
+		}
+
+		void AssignSharedPath(
+			std::vector<sfh::FontDatabase::FontFaceElement>& fonts,
+			const std::shared_ptr<const std::wstring>& sharedPath)
+		{
+			for (auto& font : fonts)
+			{
+				font.m_path.SetShared(sharedPath);
+			}
+		}
 	}
 
 	sfh::FontDatabase BuildFontDatabase(
@@ -425,6 +459,8 @@ namespace FontIndexCore
 		const auto analyzeStart = std::chrono::steady_clock::now();
 
 		std::mutex resultLock;
+		SharedPathPool pathPool;
+		pathPool.reserve(fontFiles.size());
 		std::atomic<size_t> nextBatchIndex = 0;
 
 		std::vector<std::thread> workers;
@@ -454,6 +490,7 @@ namespace FontIndexCore
 						{
 							auto result = analyzer.AnalyzeFontFile(fontFiles[currentIndex].c_str());
 							std::lock_guard lg(resultLock);
+							AssignSharedPath(result, InternPath(fontFiles[currentIndex], pathPool));
 							db.m_fonts.insert(
 								db.m_fonts.end(),
 								std::make_move_iterator(result.begin()),
@@ -496,8 +533,7 @@ namespace FontIndexCore
 
 		ThrowIfCancelled(isCancelled);
 		const auto deduplicateStart = std::chrono::steady_clock::now();
-		db.DeduplicatePaths();
-		const auto deduplicateEnd = std::chrono::steady_clock::now();
+		const auto deduplicateEnd = deduplicateStart;
 		if (stats)
 		{
 			stats->m_totalElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deduplicateEnd - totalStart).count());

@@ -83,10 +83,17 @@ namespace FontIndexCore
 			}
 		};
 
-		class FontAnalyzer
+		class FontFileParser
+		{
+		public:
+			virtual ~FontFileParser() = default;
+			virtual std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) = 0;
+		};
+
+		class FontAnalyzer final : public FontFileParser
 		{
 		private:
-			class Implementation
+			class FreeTypeFontFileParser final : public FontFileParser
 			{
 			private:
 				std::vector<unsigned char> m_buffer;
@@ -169,18 +176,18 @@ namespace FontIndexCore
 			public:
 				FT_Library m_lib;
 
-				Implementation()
+				FreeTypeFontFileParser()
 				{
 					m_buffer.reserve(1024);
 					FT_Init_FreeType(&m_lib);
 				}
 
-				~Implementation()
+				~FreeTypeFontFileParser() override
 				{
 					FT_Done_FreeType(m_lib);
 				}
 
-				std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path)
+				std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) override
 				{
 					std::vector<sfh::FontDatabase::FontFaceElement> ret;
 					FileMapping mapping(path);
@@ -270,10 +277,15 @@ namespace FontIndexCore
 				}
 			};
 
-			std::unique_ptr<Implementation> m_impl;
+			static std::unique_ptr<FontFileParser> CreateParser()
+			{
+				return std::make_unique<FreeTypeFontFileParser>();
+			}
+
+			std::unique_ptr<FontFileParser> m_impl;
 		public:
 			FontAnalyzer()
-				: m_impl(std::make_unique<Implementation>())
+				: m_impl(CreateParser())
 			{
 			}
 
@@ -285,7 +297,7 @@ namespace FontIndexCore
 			FontAnalyzer& operator=(const FontAnalyzer&) = delete;
 			FontAnalyzer& operator=(FontAnalyzer&&) = delete;
 
-			std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path)
+			std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) override
 			{
 				return m_impl->AnalyzeFontFile(path);
 			}

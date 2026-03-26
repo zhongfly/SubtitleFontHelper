@@ -145,7 +145,16 @@ namespace
 	struct FaceDirectory
 	{
 		uint32_t m_sfntVersion = 0;
-		std::vector<TableRecord> m_tables;
+		TableRecord m_nameTable;
+		TableRecord m_os2Table;
+		TableRecord m_headTable;
+		TableRecord m_cffTable;
+		bool m_hasNameTable = false;
+		bool m_hasOs2Table = false;
+		bool m_hasHeadTable = false;
+		bool m_hasCffTable = false;
+		bool m_hasCff2Table = false;
+		bool m_hasGlyfTable = false;
 	};
 
 	struct Os2Info
@@ -238,31 +247,72 @@ namespace
 				size,
 				faceOffset + 12,
 				static_cast<uint32_t>(tableCount) * 16);
-			directory.m_tables.reserve(tableCount);
 
 			for (uint16_t tableIndex = 0; tableIndex < tableCount; ++tableIndex)
 			{
 				const auto* record = records.data() + static_cast<size_t>(tableIndex) * 16;
-				directory.m_tables.push_back({
+				const TableRecord table
+				{
 					ReadUInt32BE(record),
 					ReadUInt32BE(record + 8),
 					ReadUInt32BE(record + 12)
-					});
+				};
+
+				switch (table.m_tag)
+				{
+				case kTagName:
+					if (!directory.m_hasNameTable)
+					{
+						directory.m_nameTable = table;
+						directory.m_hasNameTable = true;
+					}
+					break;
+				case kTagOs2:
+					if (!directory.m_hasOs2Table)
+					{
+						directory.m_os2Table = table;
+						directory.m_hasOs2Table = true;
+					}
+					break;
+				case kTagHead:
+					if (!directory.m_hasHeadTable)
+					{
+						directory.m_headTable = table;
+						directory.m_hasHeadTable = true;
+					}
+					break;
+				case kTagCff:
+					if (!directory.m_hasCffTable)
+					{
+						directory.m_cffTable = table;
+						directory.m_hasCffTable = true;
+					}
+					break;
+				case kTagCff2:
+					directory.m_hasCff2Table = true;
+					break;
+				case kTagGlyf:
+					directory.m_hasGlyfTable = true;
+					break;
+				default:
+					break;
+				}
 			}
 
 			return directory;
 		}
 
-		const TableRecord* FindTable(const FaceDirectory& directory, uint32_t tag) const
+		const TableRecord* TryGetTable(const TableRecord& table, bool hasTable) const
 		{
-			for (const auto& table : directory.m_tables)
-			{
-				if (table.m_tag == tag)
-				{
-					return &table;
-				}
-			}
-			return nullptr;
+			return hasTable ? &table : nullptr;
+		}
+
+		bool HasOutline(const FaceDirectory& directory) const
+		{
+			return directory.m_sfntVersion == kSfntVersionType1
+				|| directory.m_hasGlyfTable
+				|| directory.m_hasCffTable
+				|| directory.m_hasCff2Table;
 		}
 
 		std::wstring ConvertMBCSName(uint16_t encodingId, std::span<const uint8_t> bytes)
@@ -365,6 +415,7 @@ namespace
 				return;
 			}
 
+			faceElement.m_names.reserve(3);
 			auto tableData = GetSlice(data, size, nameTable->m_offset, nameTable->m_length);
 			const uint16_t nameCount = ReadUInt16BE(tableData.data() + 2);
 			const uint16_t stringOffset = ReadUInt16BE(tableData.data() + 4);
@@ -488,10 +539,7 @@ namespace
 			const Os2Info& os2,
 			const TableRecord* headTable) const
 		{
-			const bool hasOutline = directory.m_sfntVersion == kSfntVersionType1
-				|| FindTable(directory, kTagGlyf) != nullptr
-				|| FindTable(directory, kTagCff) != nullptr
-				|| FindTable(directory, kTagCff2) != nullptr;
+			const bool hasOutline = HasOutline(directory);
 			if (hasOutline && os2.m_hasTable && os2.m_version != 0xffffu && os2.m_hasFsSelection)
 			{
 				return (os2.m_fsSelection & kFsSelectionBold) != 0;
@@ -509,10 +557,7 @@ namespace
 			const Os2Info& os2,
 			const TableRecord* headTable) const
 		{
-			const bool hasOutline = directory.m_sfntVersion == kSfntVersionType1
-				|| FindTable(directory, kTagGlyf) != nullptr
-				|| FindTable(directory, kTagCff) != nullptr
-				|| FindTable(directory, kTagCff2) != nullptr;
+			const bool hasOutline = HasOutline(directory);
 			if (hasOutline && os2.m_hasTable && os2.m_version != 0xffffu && os2.m_hasFsSelection)
 			{
 				if ((os2.m_fsSelection & kFsSelectionOblique) != 0)
@@ -555,10 +600,10 @@ namespace
 			for (size_t faceIndex = 0; faceIndex < faceOffsets.size(); ++faceIndex)
 			{
 				const auto directory = ReadFaceDirectory(mapping.Data(), mapping.Size(), faceOffsets[faceIndex]);
-				const auto* nameTable = FindTable(directory, kTagName);
-				const auto* os2Table = FindTable(directory, kTagOs2);
-				const auto* headTable = FindTable(directory, kTagHead);
-				const auto* cffTable = FindTable(directory, kTagCff);
+				const auto* nameTable = TryGetTable(directory.m_nameTable, directory.m_hasNameTable);
+				const auto* os2Table = TryGetTable(directory.m_os2Table, directory.m_hasOs2Table);
+				const auto* headTable = TryGetTable(directory.m_headTable, directory.m_hasHeadTable);
+				const auto* cffTable = TryGetTable(directory.m_cffTable, directory.m_hasCffTable);
 
 				const auto os2 = ReadOs2Info(mapping.Data(), mapping.Size(), os2Table);
 				const bool isBold = ComputeBold(mapping.Data(), mapping.Size(), directory, os2, headTable);

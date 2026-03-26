@@ -356,6 +356,45 @@ namespace FontIndexCore
 				}
 			}
 		};
+
+		struct AnalyzeBatch
+		{
+			size_t m_beginIndex = 0;
+			size_t m_endIndex = 0;
+		};
+
+		std::vector<AnalyzeBatch> BuildAnalyzeBatches(const std::vector<std::filesystem::path>& fontFiles)
+		{
+			constexpr size_t kMaxBatchSize = 64;
+
+			std::vector<AnalyzeBatch> batches;
+			batches.reserve((fontFiles.size() + kMaxBatchSize - 1) / kMaxBatchSize);
+
+			size_t batchBeginIndex = 0;
+			size_t batchSize = 0;
+			std::filesystem::path currentDirectory;
+
+			for (size_t index = 0; index < fontFiles.size(); ++index)
+			{
+				const auto directory = fontFiles[index].parent_path();
+				const bool shouldFlush = batchSize != 0
+					&& (directory != currentDirectory || batchSize >= kMaxBatchSize);
+				if (shouldFlush)
+				{
+					batches.push_back({ batchBeginIndex, index });
+					batchBeginIndex = index;
+					batchSize = 0;
+				}
+				if (batchSize == 0)
+				{
+					currentDirectory = directory;
+				}
+				++batchSize;
+			}
+
+			batches.push_back({ batchBeginIndex, fontFiles.size() });
+			return batches;
+		}
 	}
 
 	sfh::FontDatabase BuildFontDatabase(
@@ -381,12 +420,12 @@ namespace FontIndexCore
 			return db;
 		}
 
+		const auto analyzeBatches = BuildAnalyzeBatches(fontFiles);
 		const size_t workerCountValue = std::max<size_t>(1, workerCount);
 		const auto analyzeStart = std::chrono::steady_clock::now();
 
 		std::mutex resultLock;
-		std::mutex consumeLock;
-		size_t nextFileIndex = 0;
+		std::atomic<size_t> nextBatchIndex = 0;
 
 		std::vector<std::thread> workers;
 		workers.reserve(workerCountValue);
@@ -400,37 +439,38 @@ namespace FontIndexCore
 				{
 					ThrowIfCancelled(isCancelled);
 
-					size_t currentIndex;
+					const size_t currentBatchIndex = nextBatchIndex.fetch_add(1, std::memory_order_relaxed);
+					if (currentBatchIndex >= analyzeBatches.size())
 					{
-						std::lock_guard lg(consumeLock);
-						if (nextFileIndex == fontFiles.size())
-						{
-							return;
-						}
-						currentIndex = nextFileIndex;
-						++nextFileIndex;
+						return;
 					}
 
-					try
+					const auto& batch = analyzeBatches[currentBatchIndex];
+					for (size_t currentIndex = batch.m_beginIndex; currentIndex < batch.m_endIndex; ++currentIndex)
 					{
-						auto result = analyzer.AnalyzeFontFile(fontFiles[currentIndex].c_str());
-						std::lock_guard lg(resultLock);
-						db.m_fonts.insert(
-							db.m_fonts.end(),
-							std::make_move_iterator(result.begin()),
-							std::make_move_iterator(result.end()));
-					}
-					catch (const std::exception& e)
-					{
-						if (onError)
-						{
-							onError(fontFiles[currentIndex], e.what());
-						}
-					}
+						ThrowIfCancelled(isCancelled);
 
-					if (progress)
-					{
-						++(*progress);
+						try
+						{
+							auto result = analyzer.AnalyzeFontFile(fontFiles[currentIndex].c_str());
+							std::lock_guard lg(resultLock);
+							db.m_fonts.insert(
+								db.m_fonts.end(),
+								std::make_move_iterator(result.begin()),
+								std::make_move_iterator(result.end()));
+						}
+						catch (const std::exception& e)
+						{
+							if (onError)
+							{
+								onError(fontFiles[currentIndex], e.what());
+							}
+						}
+
+						if (progress)
+						{
+							++(*progress);
+						}
 					}
 				}
 			});

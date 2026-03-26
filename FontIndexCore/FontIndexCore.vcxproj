@@ -204,9 +204,11 @@
     <ClCompile Include="FontDeduplicate.cpp" />
     <ClCompile Include="FontIndexCore.cpp" />
     <ClCompile Include="FontSnapshot.cpp" />
+    <ClCompile Include="SfntFontFileParser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FontIndexCore.h" />
+    <ClInclude Include="FontFileParserInternal.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -23,9 +23,15 @@
     <ClCompile Include="FontSnapshot.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SfntFontFileParser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FontIndexCore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FontFileParserInternal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

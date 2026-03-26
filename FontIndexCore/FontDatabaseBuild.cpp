@@ -1,4 +1,5 @@
 #include "FontIndexCore.h"
+#include "FontFileParserInternal.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -83,17 +84,19 @@ namespace FontIndexCore
 			}
 		};
 
-		class FontFileParser
+
+		enum class FontParserBackend
 		{
-		public:
-			virtual ~FontFileParser() = default;
-			virtual std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) = 0;
+			FreeType,
+			SfntPrototype,
 		};
 
-		class FontAnalyzer final : public FontFileParser
+		constexpr FontParserBackend kDefaultFontParserBackend = FontParserBackend::FreeType;
+
+		class FontAnalyzer final : public Internal::FontFileParser
 		{
 		private:
-			class FreeTypeFontFileParser final : public FontFileParser
+			class FreeTypeFontFileParser final : public Internal::FontFileParser
 			{
 			private:
 				std::vector<unsigned char> m_buffer;
@@ -277,15 +280,27 @@ namespace FontIndexCore
 				}
 			};
 
-			static std::unique_ptr<FontFileParser> CreateParser()
+			static std::unique_ptr<Internal::FontFileParser> CreateFreeTypeParser()
 			{
 				return std::make_unique<FreeTypeFontFileParser>();
 			}
 
-			std::unique_ptr<FontFileParser> m_impl;
+			static std::unique_ptr<Internal::FontFileParser> CreateParser(FontParserBackend backend)
+			{
+				switch (backend)
+				{
+				case FontParserBackend::SfntPrototype:
+					return Internal::CreateSfntFontFileParser();
+				case FontParserBackend::FreeType:
+				default:
+					return CreateFreeTypeParser();
+				}
+			}
+
+			std::unique_ptr<Internal::FontFileParser> m_impl;
 		public:
 			FontAnalyzer()
-				: m_impl(CreateParser())
+				: m_impl(CreateParser(kDefaultFontParserBackend))
 			{
 			}
 

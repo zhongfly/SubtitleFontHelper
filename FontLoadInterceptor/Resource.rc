@@ -12,6 +12,18 @@
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
+#include "../SharedIncludes/VersionInfo.h"
+#define SFH_FILE_DESCRIPTION "Subtitle Font Load Interceptor"
+#ifdef SFH_TARGET_x64
+#define SFH_INTERNAL_NAME "FontLoadInterceptor64.dll"
+#define SFH_ORIGINAL_FILENAME "FontLoadInterceptor64.dll"
+#else
+#define SFH_INTERNAL_NAME "FontLoadInterceptor32.dll"
+#define SFH_ORIGINAL_FILENAME "FontLoadInterceptor32.dll"
+#endif
+#define SFH_FILE_TYPE VFT_DLL
+#include "../SharedIncludes/VersionInfo.rc2"
+
 /////////////////////////////////////////////////////////////////////////////
 // 英语(美国) resources
 

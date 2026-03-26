@@ -12,6 +12,18 @@
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
+#include "../SharedIncludes/VersionInfo.h"
+#define SFH_FILE_DESCRIPTION "Subtitle Font Helper Event Resources"
+#ifdef SFH_TARGET_x64
+#define SFH_INTERNAL_NAME "Generated64.dll"
+#define SFH_ORIGINAL_FILENAME "Generated64.dll"
+#else
+#define SFH_INTERNAL_NAME "Generated32.dll"
+#define SFH_ORIGINAL_FILENAME "Generated32.dll"
+#endif
+#define SFH_FILE_TYPE VFT_DLL
+#include "../SharedIncludes/VersionInfo.rc2"
+
 /////////////////////////////////////////////////////////////////////////////
 // 中文(简体，中国) 资源
 

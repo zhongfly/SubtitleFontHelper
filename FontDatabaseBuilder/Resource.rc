@@ -1,0 +1,10 @@
+#include "winres.h"
+#include "../SharedIncludes/VersionInfo.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+#define SFH_FILE_DESCRIPTION "Subtitle Font Database Builder"
+#define SFH_INTERNAL_NAME "FontDatabaseBuilder.exe"
+#define SFH_ORIGINAL_FILENAME "FontDatabaseBuilder.exe"
+#define SFH_FILE_TYPE VFT_APP
+#include "../SharedIncludes/VersionInfo.rc2"

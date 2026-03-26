@@ -12,6 +12,13 @@
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
+#include "../SharedIncludes/VersionInfo.h"
+#define SFH_FILE_DESCRIPTION "Subtitle Font Auto Loader Daemon"
+#define SFH_INTERNAL_NAME "SubtitleFontAutoLoaderDaemon.exe"
+#define SFH_ORIGINAL_FILENAME "SubtitleFontAutoLoaderDaemon.exe"
+#define SFH_FILE_TYPE VFT_APP
+#include "../SharedIncludes/VersionInfo.rc2"
+
 /////////////////////////////////////////////////////////////////////////////
 // Chinese (Simplified, PRC) resources
 

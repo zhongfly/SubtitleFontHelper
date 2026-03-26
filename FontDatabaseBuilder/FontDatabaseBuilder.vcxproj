@@ -205,6 +205,9 @@
     <ClInclude Include="Win32Helper.h" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="Resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="C:\Users\Apach\source\repos\SubtitleFontHelper\SharedIncludes\FontQuery.proto">
       <FileType>Document</FileType>
     </None>

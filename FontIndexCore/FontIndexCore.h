@@ -48,6 +48,15 @@ namespace FontIndexCore
 		std::vector<DirectorySnapshotEntry> m_files;
 	};
 
+	struct BuildFontDatabaseStats
+	{
+		uint64_t m_totalElapsedMs = 0;
+		uint64_t m_analyzeElapsedMs = 0;
+		uint64_t m_deduplicatePathsElapsedMs = 0;
+		size_t m_fallbackCount = 0;
+		size_t m_fontFaceCount = 0;
+	};
+
 	using FileOperationErrorCallback = std::function<void(const std::filesystem::path&, const std::string&)>;
 
 	bool IsSupportedFontFile(const std::filesystem::path& path);
@@ -83,5 +92,6 @@ namespace FontIndexCore
 		size_t workerCount,
 		const std::function<bool()>& isCancelled = {},
 		std::atomic<size_t>* progress = nullptr,
-		const FileOperationErrorCallback& onError = {});
+		const FileOperationErrorCallback& onError = {},
+		BuildFontDatabaseStats* stats = nullptr);
 }

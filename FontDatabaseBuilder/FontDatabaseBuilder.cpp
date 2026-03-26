@@ -3,10 +3,14 @@
 #include "Win32Helper.h"
 #include "../FontIndexCore/FontIndexCore.h"
 
+#include <chrono>
+#include <fstream>
 #include <shellapi.h>
 #pragma comment(lib, "Shell32.lib")
 #include <fcntl.h>
 #include <io.h>
+#include <psapi.h>
+#pragma comment(lib, "Psapi.lib")
 
 DWORD g_ProcessorCount = []()
 {
@@ -22,8 +26,39 @@ struct ProgramOptions
 {
 	std::vector<std::wstring> input;
 	std::wstring output;
+	std::wstring perfReport;
 	bool deduplicate = false;
 	bool deleteDuplicates = false;
+};
+
+struct ProcessMemorySnapshot
+{
+	uint64_t m_workingSetBytes = 0;
+	uint64_t m_peakWorkingSetBytes = 0;
+	uint64_t m_privateUsageBytes = 0;
+};
+
+struct StageTelemetry
+{
+	uint64_t m_elapsedMs = 0;
+	ProcessMemorySnapshot m_memory;
+};
+
+struct BuildTelemetryReport
+{
+	bool m_enabled = false;
+	size_t m_workerCount = 0;
+	size_t m_discoveredFiles = 0;
+	size_t m_filesToAnalyze = 0;
+	bool m_deduplicateEnabled = false;
+	std::wstring m_outputPath;
+	std::wstring m_perfReportPath;
+	StageTelemetry m_enumerate;
+	StageTelemetry m_deduplicate;
+	StageTelemetry m_build;
+	StageTelemetry m_write;
+	uint64_t m_totalElapsedMs = 0;
+	FontIndexCore::BuildFontDatabaseStats m_buildStats;
 };
 
 BOOL WINAPI ControlHandler(DWORD dwCtrlType)
@@ -48,6 +83,18 @@ void FindOptions(int argc, wchar_t** argv, ProgramOptions& options)
 				else
 				{
 					throw std::runtime_error("missing argument for option -output");
+				}
+			}
+			else if (_wcsicmp(argv[i], L"-perf-report") == 0)
+			{
+				if (i + 1 < argc)
+				{
+					options.perfReport = argv[i + 1];
+					++i;
+				}
+				else
+				{
+					throw std::runtime_error("missing argument for option -perf-report");
 				}
 			}
 			else if (_wcsicmp(argv[i], L"-dedup") == 0)
@@ -91,6 +138,119 @@ void FindOptions(int argc, wchar_t** argv, ProgramOptions& options)
 	}
 }
 
+ProcessMemorySnapshot CaptureProcessMemorySnapshot()
+{
+	PROCESS_MEMORY_COUNTERS_EX counters{};
+	if (GetProcessMemoryInfo(
+		GetCurrentProcess(),
+		reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+		sizeof(counters)))
+	{
+		return
+		{
+			static_cast<uint64_t>(counters.WorkingSetSize),
+			static_cast<uint64_t>(counters.PeakWorkingSetSize),
+			static_cast<uint64_t>(counters.PrivateUsage)
+		};
+	}
+
+	return {};
+}
+
+uint64_t ElapsedMilliseconds(
+	const std::chrono::steady_clock::time_point& start,
+	const std::chrono::steady_clock::time_point& end)
+{
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+}
+
+std::string WideToUtf8String(const std::wstring& value)
+{
+	if (value.empty())
+	{
+		return {};
+	}
+
+	const int length = WideCharToMultiByte(
+		CP_UTF8,
+		WC_ERR_INVALID_CHARS,
+		value.c_str(),
+		static_cast<int>(value.size()),
+		nullptr,
+		0,
+		nullptr,
+		nullptr);
+	THROW_LAST_ERROR_IF(length == 0);
+
+	std::string result;
+	result.resize(length);
+	const int converted = WideCharToMultiByte(
+		CP_UTF8,
+		WC_ERR_INVALID_CHARS,
+		value.c_str(),
+		static_cast<int>(value.size()),
+		result.data(),
+		length,
+		nullptr,
+		nullptr);
+	THROW_LAST_ERROR_IF(converted == 0);
+	return result;
+}
+
+void WritePerfReport(const BuildTelemetryReport& telemetry)
+{
+	if (!telemetry.m_enabled)
+	{
+		return;
+	}
+
+	const std::filesystem::path reportPath(telemetry.m_perfReportPath);
+	if (const auto parentPath = reportPath.parent_path(); !parentPath.empty())
+	{
+		std::filesystem::create_directories(parentPath);
+	}
+
+	std::ofstream stream(reportPath, std::ios::binary | std::ios::trunc);
+	if (!stream)
+	{
+		throw std::runtime_error("failed to open perf report output");
+	}
+
+	auto writeMemory = [&](const char* prefix, const ProcessMemorySnapshot& memory)
+	{
+		stream << prefix << "_working_set_bytes=" << memory.m_workingSetBytes << '\n';
+		stream << prefix << "_peak_working_set_bytes=" << memory.m_peakWorkingSetBytes << '\n';
+		stream << prefix << "_private_usage_bytes=" << memory.m_privateUsageBytes << '\n';
+	};
+
+	auto writeStage = [&](const char* prefix, const StageTelemetry& stage)
+	{
+		stream << prefix << "_elapsed_ms=" << stage.m_elapsedMs << '\n';
+		writeMemory(prefix, stage.m_memory);
+	};
+
+	stream << "worker_count=" << telemetry.m_workerCount << '\n';
+	stream << "deduplicate_enabled=" << (telemetry.m_deduplicateEnabled ? "true" : "false") << '\n';
+	stream << "discovered_files=" << telemetry.m_discoveredFiles << '\n';
+	stream << "files_to_analyze=" << telemetry.m_filesToAnalyze << '\n';
+	stream << "output_path=" << WideToUtf8String(telemetry.m_outputPath) << '\n';
+
+	writeStage("enumerate", telemetry.m_enumerate);
+	if (telemetry.m_deduplicateEnabled)
+	{
+		writeStage("deduplicate", telemetry.m_deduplicate);
+	}
+	writeStage("build", telemetry.m_build);
+	writeStage("write", telemetry.m_write);
+
+	stream << "build_total_elapsed_ms=" << telemetry.m_buildStats.m_totalElapsedMs << '\n';
+	stream << "build_analyze_elapsed_ms=" << telemetry.m_buildStats.m_analyzeElapsedMs << '\n';
+	stream << "build_deduplicate_paths_elapsed_ms=" << telemetry.m_buildStats.m_deduplicatePathsElapsedMs << '\n';
+	stream << "build_fallback_count=" << telemetry.m_buildStats.m_fallbackCount << '\n';
+	stream << "font_face_count=" << telemetry.m_buildStats.m_fontFaceCount << '\n';
+	stream << "total_elapsed_ms=" << telemetry.m_totalElapsedMs << '\n';
+}
+
 void MoveFileToRecycleBin(const std::wstring& path)
 {
 	std::wstring from = path;
@@ -109,8 +269,9 @@ void MoveFileToRecycleBin(const std::wstring& path)
 void PrintHelp()
 {
 	std::wcout << SetOutputDefault
-		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-dedup] [-delete-duplicates] [-worker WorkerCount] Directory... \n"
+		<< "Usage: FontDatabaseBuilder.exe [-output OutputFile] [-perf-report PerfReportFile] [-dedup] [-delete-duplicates] [-worker WorkerCount] Directory... \n"
 		<< "\t-output OutputFile: path to the output\n"
+		<< "\t-perf-report PerfReportFile: write opt-in stage timing and memory report\n"
 		<< "\t-dedup: enable deduplication of files\n"
 		<< "\t-delete-duplicates: deduplicate files and move redundant copies to recycle bin\n"
 		<< "\t-worker WorkerCount: set work thread count, default is half of your processor count\n"
@@ -176,6 +337,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 
 	try
 	{
+		const auto totalStart = std::chrono::steady_clock::now();
 		// validate arguments
 		ProgramOptions options;
 		try
@@ -231,6 +393,13 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 		}
 		std::wcout << SetOutputDefault;
 
+		BuildTelemetryReport telemetry;
+		telemetry.m_enabled = !options.perfReport.empty();
+		telemetry.m_workerCount = g_WorkerCount;
+		telemetry.m_deduplicateEnabled = options.deduplicate;
+		telemetry.m_outputPath = options.output;
+		telemetry.m_perfReportPath = options.perfReport;
+
 		std::wcout << "WORKER_COUNT = " << g_WorkerCount << std::endl;
 
 		std::vector<std::filesystem::path> inputDirectories;
@@ -240,10 +409,18 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 			inputDirectories.emplace_back(directory);
 		}
 
+		const auto enumerateStart = std::chrono::steady_clock::now();
 		auto discoveredFiles = FontIndexCore::EnumerateFontFiles(inputDirectories, []()
 		{
 			return g_cancelToken.load();
 		});
+		const auto enumerateEnd = std::chrono::steady_clock::now();
+		if (telemetry.m_enabled)
+		{
+			telemetry.m_discoveredFiles = discoveredFiles.size();
+			telemetry.m_enumerate.m_elapsedMs = ElapsedMilliseconds(enumerateStart, enumerateEnd);
+			telemetry.m_enumerate.m_memory = CaptureProcessMemorySnapshot();
+		}
 
 		std::wcout << "Discovered " << discoveredFiles.size() << " files." << std::endl;
 
@@ -258,6 +435,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 		if (options.deduplicate)
 		{
 			std::wcout << "Deduplicate..." << std::endl;
+			const auto deduplicateStart = std::chrono::steady_clock::now();
 			std::atomic<size_t> progress = 0;
 			const size_t total = discoveredFiles.size();
 			FontIndexCore::DeduplicateResult deduplicateResult;
@@ -327,6 +505,12 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 				}
 			}
 			std::wcout << "Discovered " << filesToAnalyze.size() << " files." << std::endl;
+			if (telemetry.m_enabled)
+			{
+				const auto deduplicateEnd = std::chrono::steady_clock::now();
+				telemetry.m_deduplicate.m_elapsedMs = ElapsedMilliseconds(deduplicateStart, deduplicateEnd);
+				telemetry.m_deduplicate.m_memory = CaptureProcessMemorySnapshot();
+			}
 		}
 		else
 		{
@@ -336,12 +520,18 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 				filesToAnalyze.push_back(file.m_path);
 			}
 		}
+		if (telemetry.m_enabled)
+		{
+			telemetry.m_filesToAnalyze = filesToAnalyze.size();
+		}
 
 		std::wcout << "Build database..." << std::endl;
 
 		std::mutex logLock;
 		sfh::FontDatabase db;
 		std::atomic<size_t> progress = 0;
+		FontIndexCore::BuildFontDatabaseStats buildStats;
+		const auto buildStart = std::chrono::steady_clock::now();
 		std::thread buildThread([&]()
 		{
 			db = FontIndexCore::BuildFontDatabase(
@@ -358,7 +548,8 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 					EraseLineStruct::EraseLine();
 					std::wcout << SetOutputRed << L"Error analyzing file: " << path.c_str() << L'\n';
 					std::cout << "Error description: " << errorMessage << std::endl << SetOutputDefault;
-				});
+				},
+				telemetry.m_enabled ? &buildStats : nullptr);
 		});
 
 		while (!g_cancelToken)
@@ -378,12 +569,32 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[])
 		}
 		ThrowIfCancelled();
 		std::wcout << std::endl;
+		const auto buildEnd = std::chrono::steady_clock::now();
+		if (telemetry.m_enabled)
+		{
+			telemetry.m_build.m_elapsedMs = ElapsedMilliseconds(buildStart, buildEnd);
+			telemetry.m_build.m_memory = CaptureProcessMemorySnapshot();
+			telemetry.m_buildStats = buildStats;
+		}
 
 		std::wcout << "Writing output..." << std::endl;
 
+		const auto writeStart = std::chrono::steady_clock::now();
 		sfh::FontDatabase::WriteToFile(options.output, db);
+		const auto writeEnd = std::chrono::steady_clock::now();
+		if (telemetry.m_enabled)
+		{
+			telemetry.m_write.m_elapsedMs = ElapsedMilliseconds(writeStart, writeEnd);
+			telemetry.m_write.m_memory = CaptureProcessMemorySnapshot();
+			telemetry.m_totalElapsedMs = ElapsedMilliseconds(totalStart, writeEnd);
+			WritePerfReport(telemetry);
+		}
 
 		std::wcout << "Done." << std::endl;
+		if (telemetry.m_enabled)
+		{
+			std::wcout << "Perf report written to: " << telemetry.m_perfReportPath << std::endl;
+		}
 	}
 	catch (std::exception& e)
 	{

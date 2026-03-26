@@ -15,6 +15,7 @@
 #include FT_TYPE1_TABLES_H
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -362,19 +363,26 @@ namespace FontIndexCore
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
 		std::atomic<size_t>* progress,
-		const FileOperationErrorCallback& onError)
+		const FileOperationErrorCallback& onError,
+		BuildFontDatabaseStats* stats)
 	{
 		sfh::FontDatabase db;
 		db.m_fonts.reserve(fontFiles.size());
 
+		const auto totalStart = std::chrono::steady_clock::now();
 		g_fontParserFallbackCount.store(0, std::memory_order_relaxed);
 
 		if (fontFiles.empty())
 		{
+			if (stats)
+			{
+				*stats = {};
+			}
 			return db;
 		}
 
 		const size_t workerCountValue = std::max<size_t>(1, workerCount);
+		const auto analyzeStart = std::chrono::steady_clock::now();
 
 		std::mutex resultLock;
 		std::mutex consumeLock;
@@ -436,6 +444,7 @@ namespace FontIndexCore
 			}
 		}
 
+		const auto analyzeEnd = std::chrono::steady_clock::now();
 		const auto fallbackCount = g_fontParserFallbackCount.load(std::memory_order_relaxed);
 		if (fallbackCount != 0)
 		{
@@ -446,7 +455,17 @@ namespace FontIndexCore
 		}
 
 		ThrowIfCancelled(isCancelled);
+		const auto deduplicateStart = std::chrono::steady_clock::now();
 		db.DeduplicatePaths();
+		const auto deduplicateEnd = std::chrono::steady_clock::now();
+		if (stats)
+		{
+			stats->m_totalElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deduplicateEnd - totalStart).count());
+			stats->m_analyzeElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(analyzeEnd - analyzeStart).count());
+			stats->m_deduplicatePathsElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deduplicateEnd - deduplicateStart).count());
+			stats->m_fallbackCount = fallbackCount;
+			stats->m_fontFaceCount = db.m_fonts.size();
+		}
 		return db;
 	}
 }

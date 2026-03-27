@@ -746,7 +746,11 @@ namespace sfh
 
 			try
 			{
-				ManagedIndexBuildFeedbackSession feedback(m_daemon, m_task.m_indexPath, m_task.m_progressState);
+				ManagedIndexBuildFeedbackSession feedback(
+					m_daemon,
+					m_task.m_indexPath,
+					m_task.m_progressState,
+					m_task.m_enableProgressNotifications);
 				if (m_hasLastSnapshot)
 				{
 					ApplyCachedHashes(m_lastSnapshot, newSnapshot);

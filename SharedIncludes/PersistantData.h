@@ -24,6 +24,7 @@ namespace sfh
 
 		uint32_t wmiPollInterval = 500;
 		uint32_t lruSize = 100;
+		bool managedIndexProgressNotifications = false;
 
 		// content
 		std::vector<IndexFileElement> m_indexFile;

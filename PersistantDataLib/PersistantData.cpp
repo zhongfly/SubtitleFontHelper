@@ -49,6 +49,35 @@ namespace
 			&& wcsncmp(actual, expected, actualLength) == 0;
 	}
 
+	bool TryParseXmlBoolean(const wchar_t* value, int valueLength, bool& result)
+	{
+		if (valueLength == 1)
+		{
+			if (value[0] == L'1')
+			{
+				result = true;
+				return true;
+			}
+			if (value[0] == L'0')
+			{
+				result = false;
+				return true;
+			}
+		}
+
+		if (valueLength == 4 && _wcsnicmp(value, L"true", 4) == 0)
+		{
+			result = true;
+			return true;
+		}
+		if (valueLength == 5 && _wcsnicmp(value, L"false", 5) == 0)
+		{
+			result = false;
+			return true;
+		}
+		return false;
+	}
+
 	std::string ReadUtf8TextFile(const std::wstring& path)
 	{
 		std::string ret;
@@ -661,6 +690,14 @@ namespace
 			return *integerValue;
 		}
 
+		static bool ExpectBool(const TomlValue& value, const char* keyName)
+		{
+			auto boolValue = std::get_if<bool>(&value);
+			if (boolValue == nullptr)
+				throw std::runtime_error(std::string("TOML key requires boolean value: ") + keyName);
+			return *boolValue;
+		}
+
 		static const std::vector<std::wstring>& ExpectStringArray(const TomlValue& value, const char* keyName)
 		{
 			auto arrayValue = std::get_if<std::vector<std::wstring>>(&value);
@@ -678,6 +715,10 @@ namespace
 			else if (key == "lru_size" || key == "lruSize")
 			{
 				m_config->lruSize = ExpectUInt32(value, key.c_str());
+			}
+			else if (key == "managed_index_progress_notifications" || key == "managedIndexProgressNotifications")
+			{
+				m_config->managedIndexProgressNotifications = ExpectBool(value, key.c_str());
 			}
 			else if (key == "monitor_processes" || key == "monitorProcesses")
 			{
@@ -905,6 +946,7 @@ namespace
 
 					DEFINE_XML_ATTRIBUTE(wmiPollInterval);
 					DEFINE_XML_ATTRIBUTE(lruSize);
+					DEFINE_XML_ATTRIBUTE(managedIndexProgressNotifications);
 
 #undef DEFINE_XML_ATTRIBUTE
 					if (SUCCEEDED(
@@ -927,6 +969,30 @@ namespace
 						try
 						{
 							m_config->lruSize = wcstou32(attrValue, attrLength);
+						}
+						catch (...)
+						{
+							// don't let exceptions travel across dll
+							return E_FAIL;
+						}
+					}
+					if (SUCCEEDED(
+						pAttributes->getValueFromName(
+							L"",
+							0,
+							managedIndexProgressNotifications,
+							managedIndexProgressNotificationsCch,
+							&attrValue,
+							&attrLength)))
+					{
+						try
+						{
+							bool boolValue = false;
+							if (!TryParseXmlBoolean(attrValue, attrLength, boolValue))
+							{
+								return E_FAIL;
+							}
+							m_config->managedIndexProgressNotifications = boolValue;
 						}
 						catch (...)
 						{
@@ -1408,6 +1474,13 @@ namespace sfh
 		THROW_IF_FAILED(rootElement->setAttribute(wil::make_bstr(L"wmiPollInterval").get(), value));
 		InitVariantFromString(std::to_wstring(config.lruSize).c_str(), value.addressof());
 		THROW_IF_FAILED(rootElement->setAttribute(wil::make_bstr(L"lruSize").get(), value));
+		InitVariantFromString(
+			config.managedIndexProgressNotifications ? L"true" : L"false",
+			value.addressof());
+		THROW_IF_FAILED(
+			rootElement->setAttribute(
+				wil::make_bstr(L"managedIndexProgressNotifications").get(),
+				value));
 		for (auto& indexFile : config.m_indexFile)
 		{
 			wil::com_ptr<IXMLDOMElement> indexFileElement;

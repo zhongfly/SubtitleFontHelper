@@ -583,6 +583,7 @@ namespace sfh
 					managedTask.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
 					managedTask.m_sourceFolders = sourceFolders;
 					managedTask.m_progressState = std::make_shared<ManagedIndexBuildProgressState>();
+					managedTask.m_enableProgressNotifications = cfg->managedIndexProgressNotifications;
 					watchOptions.m_workerCount = managedBuildWorkerCount;
 
 					std::error_code ec;

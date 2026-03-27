@@ -1,5 +1,6 @@
 wmi_poll_interval = 1000
 lru_size = 100
+# managed_index_progress_notifications = true
 monitor_processes = [
 	'mpc-hc64_nvo.exe',
 	'mpc-hc_nvo.exe',

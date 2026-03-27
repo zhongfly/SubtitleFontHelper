@@ -106,38 +106,44 @@ namespace sfh
 		ManagedIndexBuildFeedbackSession(
 			IDaemon* daemon,
 			const std::filesystem::path& indexPath,
-			const std::shared_ptr<ManagedIndexBuildProgressState>& progressState)
+			const std::shared_ptr<ManagedIndexBuildProgressState>& progressState,
+			bool enableProgressNotifications)
 			: m_daemon(daemon),
 			  m_indexPath(indexPath),
-			  m_progressState(progressState),
-			  m_notifier([state = progressState, indexName = GetManagedIndexDisplayName(indexPath)](std::stop_token stopToken)
-			  {
-				  if (!state)
-				  {
-					  return;
-				  }
-
-				  constexpr auto notifyInterval = std::chrono::seconds(30);
-				  auto nextNotificationAt = std::chrono::steady_clock::now() + notifyInterval;
-
-				  while (!stopToken.stop_requested())
-				  {
-					  const auto now = std::chrono::steady_clock::now();
-					  if (now >= nextNotificationAt)
-					  {
-						  if (state->m_buildInProgress.load(std::memory_order_relaxed))
-						  {
-							  TryShowManagedIndexProgressToast(
-								  indexName,
-								  CaptureManagedIndexBuildProgressSnapshot(*state));
-						  }
-						  nextNotificationAt = now + notifyInterval;
-					  }
-
-					  std::this_thread::sleep_for(std::chrono::milliseconds(500));
-				  }
-			  })
+			  m_progressState(progressState)
 		{
+			if (enableProgressNotifications)
+			{
+				m_notifier = std::jthread([state = progressState, indexName = GetManagedIndexDisplayName(indexPath)](
+					std::stop_token stopToken)
+				{
+					if (!state)
+					{
+						return;
+					}
+
+					constexpr auto notifyInterval = std::chrono::seconds(30);
+					auto nextNotificationAt = std::chrono::steady_clock::now() + notifyInterval;
+
+					while (!stopToken.stop_requested())
+					{
+						const auto now = std::chrono::steady_clock::now();
+						if (now >= nextNotificationAt)
+						{
+							if (state->m_buildInProgress.load(std::memory_order_relaxed))
+							{
+								TryShowManagedIndexProgressToast(
+									indexName,
+									CaptureManagedIndexBuildProgressSnapshot(*state));
+							}
+							nextNotificationAt = now + notifyInterval;
+						}
+
+						std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					}
+				});
+			}
+
 			if (m_progressState)
 			{
 				m_progressState->m_buildInProgress.store(true, std::memory_order_relaxed);

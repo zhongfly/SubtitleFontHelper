@@ -222,7 +222,11 @@ namespace sfh
 		: m_worker([daemon, task = std::move(task), workerCount](std::stop_token stopToken)
 		{
 			const auto indexName = GetDisplayName(task.m_indexPath);
-			ManagedIndexBuildFeedbackSession feedback(daemon, task.m_indexPath, task.m_progressState);
+			ManagedIndexBuildFeedbackSession feedback(
+				daemon,
+				task.m_indexPath,
+				task.m_progressState,
+				task.m_enableProgressNotifications);
 			TryLogManagedIndexBuildStart(task);
 
 			try

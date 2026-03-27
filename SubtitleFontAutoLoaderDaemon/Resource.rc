@@ -78,7 +78,7 @@ BEGIN
     END
     POPUP "TrayIconMenuLoading"
     BEGIN
-        MENUITEM "Loading...",                  ID_TRAYICONMENULOADING_LOADING, INACTIVE
+        MENUITEM "正在加载...",                ID_TRAYICONMENULOADING_LOADING, INACTIVE
     END
 END
 

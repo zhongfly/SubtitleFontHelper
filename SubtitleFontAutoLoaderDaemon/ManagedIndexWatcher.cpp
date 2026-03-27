@@ -153,6 +153,26 @@ namespace sfh
 				MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
 		}
 
+		size_t CountHashWorkItems(const FontIndexCore::DirectorySnapshot& snapshot)
+		{
+			std::unordered_map<uint64_t, size_t> sizeGroupCounts;
+			sizeGroupCounts.reserve(snapshot.m_files.size());
+			for (const auto& entry : snapshot.m_files)
+			{
+				++sizeGroupCounts[entry.m_fileSize];
+			}
+
+			size_t pendingHashes = 0;
+			for (const auto& entry : snapshot.m_files)
+			{
+				if (sizeGroupCounts[entry.m_fileSize] > 1 && !entry.m_hasContentHash)
+				{
+					++pendingHashes;
+				}
+			}
+			return pendingHashes;
+		}
+
 		bool AreSnapshotsEqual(
 			const FontIndexCore::DirectorySnapshot& lhs,
 			const FontIndexCore::DirectorySnapshot& rhs)
@@ -491,7 +511,8 @@ namespace sfh
 
 		bool IsExternalBuildInProgress() const
 		{
-			return m_task.m_buildInProgress && m_task.m_buildInProgress->load();
+			return m_task.m_progressState
+				&& m_task.m_progressState->m_buildInProgress.load(std::memory_order_relaxed);
 		}
 
 		bool QueueRead(FolderWatch& watch)
@@ -680,7 +701,8 @@ namespace sfh
 
 		std::vector<std::vector<size_t>> BuildContentGroups(
 			FontIndexCore::DirectorySnapshot& snapshot,
-			const std::stop_token& stopToken)
+			const std::stop_token& stopToken,
+			const ManagedIndexBuildFeedbackSession& feedback)
 		{
 			auto isCancelled = [&]()
 			{
@@ -688,11 +710,12 @@ namespace sfh
 			};
 
 			std::vector<std::string> failures;
+			feedback.SetStage(ManagedIndexBuildStage::Hashing, CountHashWorkItems(snapshot));
 			FontIndexCore::PopulateMissingContentHashes(
 				snapshot,
 				m_workerCount,
 				isCancelled,
-				nullptr,
+				feedback.GetProgressCounter(),
 				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
 					failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
@@ -723,12 +746,13 @@ namespace sfh
 
 			try
 			{
+				ManagedIndexBuildFeedbackSession feedback(m_daemon, m_task.m_indexPath, m_task.m_progressState);
 				if (m_hasLastSnapshot)
 				{
 					ApplyCachedHashes(m_lastSnapshot, newSnapshot);
 				}
 
-				const auto groups = BuildContentGroups(newSnapshot, stopToken);
+				const auto groups = BuildContentGroups(newSnapshot, stopToken, feedback);
 				EnsureLoadedDatabase();
 				ThrowIfCancelled(isCancelled);
 
@@ -827,11 +851,12 @@ namespace sfh
 				if (!pathsToAnalyze.empty())
 				{
 					std::vector<std::string> analyzeFailures;
+					feedback.SetStage(ManagedIndexBuildStage::Analyzing, pathsToAnalyze.size());
 					auto analyzed = FontIndexCore::BuildFontDatabase(
 						pathsToAnalyze,
 						m_workerCount,
 						isCancelled,
-						nullptr,
+						feedback.GetProgressCounter(),
 						[&](const std::filesystem::path& path, const std::string& errorMessage)
 						{
 							analyzeFailures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
@@ -849,6 +874,10 @@ namespace sfh
 				}
 
 				ThrowIfCancelled(isCancelled);
+				feedback.SetStage(
+					ManagedIndexBuildStage::Writing,
+					pathsToAnalyze.size(),
+					pathsToAnalyze.size());
 				WriteFontDatabaseAtomically(m_task.m_indexPath, m_database);
 				ThrowIfCancelled(isCancelled);
 				FontIndexCore::WriteDirectorySnapshot(m_task.m_snapshotPath, newSnapshot);

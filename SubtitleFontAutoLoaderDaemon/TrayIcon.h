@@ -22,6 +22,7 @@ namespace sfh
 		SystemTray& operator=(SystemTray&&) = delete;
 
 		void Start();
+		void SetManagedIndexBuildCount(size_t buildCount);
 		void NotifyFinishLoad();
 	};
 }

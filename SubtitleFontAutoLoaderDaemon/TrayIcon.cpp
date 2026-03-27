@@ -22,7 +22,8 @@ private:
 	IDaemon* m_daemon;
 	std::atomic<size_t> m_checkPoint = 0;
 
-	std::atomic<bool> m_loading = true;
+	std::atomic<bool> m_startupLoading = true;
+	std::atomic<size_t> m_managedIndexBuildCount = 0;
 	std::atomic<bool> m_exitRequested = false;
 	wil::unique_event m_startEvent;
 public:
@@ -66,14 +67,26 @@ public:
 		m_startEvent.SetEvent();
 	}
 
+	void SetManagedIndexBuildCount(size_t buildCount)
+	{
+		m_managedIndexBuildCount = buildCount;
+		if (m_hWnd != nullptr)
+			PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
+	}
+
 	void NotifyFinishLoad()
 	{
-		m_loading = false;
+		m_startupLoading = false;
 		if (m_hWnd != nullptr)
 			PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
 	}
 
 private:
+	bool IsLoading() const
+	{
+		return m_startupLoading.load() || m_managedIndexBuildCount.load() != 0;
+	}
+
 	void SetupMessageWindow()
 	{
 		WNDCLASSW wndClass;
@@ -114,9 +127,20 @@ private:
 			m_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 			m_iconData.uCallbackMessage = WM_TRAY_ICON_MESSAGE;
 		}
-		if (m_loading)
+		if (IsLoading())
 		{
-			wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - Loading");
+			if (m_startupLoading.load())
+			{
+				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在加载");
+			}
+			else if (m_managedIndexBuildCount.load() == 1)
+			{
+				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在建立索引");
+			}
+			else
+			{
+				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在建立多个索引");
+			}
 			m_iconData.hIcon = LoadIconW(wil::GetModuleInstanceHandle(), MAKEINTRESOURCEW(IDI_TRAYICONLOADING));
 		}
 		else
@@ -163,7 +187,7 @@ private:
 		case WM_TRAY_ICON_MESSAGE:
 			if (lParam == WM_RBUTTONUP)
 			{
-				ShowContextMenu(hWnd, uMsg, wParam, lParam, m_loading.load());
+				ShowContextMenu(hWnd, uMsg, wParam, lParam, m_startupLoading.load());
 			}
 		case WM_UPDATE_TRAY_ICON_MESSAGE:
 			SetupTrayIcon(false);
@@ -233,6 +257,11 @@ sfh::SystemTray::~SystemTray() = default;
 void sfh::SystemTray::Start()
 {
 	m_impl->Start();
+}
+
+void sfh::SystemTray::SetManagedIndexBuildCount(size_t buildCount)
+{
+	m_impl->SetManagedIndexBuildCount(buildCount);
 }
 
 void sfh::SystemTray::NotifyFinishLoad()

@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "IDaemon.h"
+#include "ManagedIndexProgress.h"
 
 #include <atomic>
 #include <functional>
@@ -17,7 +18,7 @@ namespace sfh
 			std::filesystem::path m_indexPath;
 			std::filesystem::path m_snapshotPath;
 			std::vector<std::filesystem::path> m_sourceFolders;
-			std::shared_ptr<std::atomic<bool>> m_buildInProgress;
+			std::shared_ptr<ManagedIndexBuildProgressState> m_progressState;
 		};
 
 		ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount);
@@ -36,6 +37,7 @@ namespace sfh
 	size_t BuildManagedIndex(
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
-		const std::function<bool()>& isCancelled = {});
+		const std::function<bool()>& isCancelled,
+		const ManagedIndexBuildFeedbackSession& feedback);
 	void ValidateManagedIndexSourceFolders(const ManagedIndexBuilder::Task& task);
 }

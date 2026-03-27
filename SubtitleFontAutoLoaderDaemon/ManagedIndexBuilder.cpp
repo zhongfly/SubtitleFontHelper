@@ -11,6 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+#include <unordered_map>
 #include <wil/resource.h>
 
 namespace sfh
@@ -115,6 +116,26 @@ namespace sfh
 				path.c_str(),
 				MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
 		}
+
+		size_t CountHashWorkItems(const FontIndexCore::DirectorySnapshot& snapshot)
+		{
+			std::unordered_map<uint64_t, size_t> sizeGroupCounts;
+			sizeGroupCounts.reserve(snapshot.m_files.size());
+			for (const auto& entry : snapshot.m_files)
+			{
+				++sizeGroupCounts[entry.m_fileSize];
+			}
+
+			size_t pendingHashes = 0;
+			for (const auto& entry : snapshot.m_files)
+			{
+				if (sizeGroupCounts[entry.m_fileSize] > 1 && !entry.m_hasContentHash)
+				{
+					++pendingHashes;
+				}
+			}
+			return pendingHashes;
+		}
 	}
 
 	void ValidateManagedIndexSourceFolders(const ManagedIndexBuilder::Task& task)
@@ -138,16 +159,19 @@ namespace sfh
 	size_t BuildManagedIndex(
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
-		const std::function<bool()>& isCancelled)
+		const std::function<bool()>& isCancelled,
+		const ManagedIndexBuildFeedbackSession& feedback)
 	{
 		ValidateManagedIndexSourceFolders(task);
+		feedback.SetStage(ManagedIndexBuildStage::Scanning);
 		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
 		std::vector<std::string> failures;
+		feedback.SetStage(ManagedIndexBuildStage::Hashing, CountHashWorkItems(snapshot));
 		FontIndexCore::PopulateMissingContentHashes(
 			snapshot,
 			workerCount,
 			isCancelled,
-			nullptr,
+			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
 				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
@@ -171,11 +195,12 @@ namespace sfh
 			fontPaths.push_back(snapshot.m_files[group.front()].m_path);
 		}
 
+		feedback.SetStage(ManagedIndexBuildStage::Analyzing, fontPaths.size());
 		auto db = FontIndexCore::BuildFontDatabase(
 			fontPaths,
 			workerCount,
 			isCancelled,
-			nullptr,
+			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
 				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
@@ -185,6 +210,7 @@ namespace sfh
 			throw std::runtime_error(failures.front());
 		}
 		ThrowIfCancelled(isCancelled);
+		feedback.SetStage(ManagedIndexBuildStage::Writing, fontPaths.size(), fontPaths.size());
 		WriteFontDatabaseAtomically(task.m_indexPath, db);
 		ThrowIfCancelled(isCancelled);
 		FontIndexCore::WriteDirectorySnapshot(task.m_snapshotPath, snapshot);
@@ -196,14 +222,7 @@ namespace sfh
 		: m_worker([daemon, task = std::move(task), workerCount](std::stop_token stopToken)
 		{
 			const auto indexName = GetDisplayName(task.m_indexPath);
-			auto clearBuildInProgress = wil::scope_exit([&]()
-			{
-				if (task.m_buildInProgress)
-				{
-					task.m_buildInProgress->store(false);
-				}
-			});
-			TryShowToast(L"Subtitle Font Helper", L"开始建立索引：" + indexName);
+			ManagedIndexBuildFeedbackSession feedback(daemon, task.m_indexPath, task.m_progressState);
 			TryLogManagedIndexBuildStart(task);
 
 			try
@@ -213,7 +232,7 @@ namespace sfh
 					return stopToken.stop_requested();
 				};
 
-				const auto fontFileCount = BuildManagedIndex(task, workerCount, isCancelled);
+				const auto fontFileCount = BuildManagedIndex(task, workerCount, isCancelled, feedback);
 
 				TryShowToast(
 					L"Subtitle Font Helper",

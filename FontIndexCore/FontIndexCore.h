@@ -52,7 +52,6 @@ namespace FontIndexCore
 	{
 		uint64_t m_totalElapsedMs = 0;
 		uint64_t m_analyzeElapsedMs = 0;
-		uint64_t m_deduplicatePathsElapsedMs = 0;
 		size_t m_fallbackCount = 0;
 		size_t m_fontFaceCount = 0;
 	};

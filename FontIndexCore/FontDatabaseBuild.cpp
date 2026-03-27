@@ -549,13 +549,11 @@ namespace FontIndexCore
 		}
 
 		ThrowIfCancelled(isCancelled);
-		const auto deduplicateStart = std::chrono::steady_clock::now();
-		const auto deduplicateEnd = deduplicateStart;
+		const auto totalEnd = std::chrono::steady_clock::now();
 		if (stats)
 		{
-			stats->m_totalElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deduplicateEnd - totalStart).count());
+			stats->m_totalElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(totalEnd - totalStart).count());
 			stats->m_analyzeElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(analyzeEnd - analyzeStart).count());
-			stats->m_deduplicatePathsElapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deduplicateEnd - deduplicateStart).count());
 			stats->m_fallbackCount = fallbackCount;
 			stats->m_fontFaceCount = db.m_fonts.size();
 		}

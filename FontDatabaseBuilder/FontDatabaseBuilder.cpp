@@ -245,7 +245,6 @@ void WritePerfReport(const BuildTelemetryReport& telemetry)
 
 	stream << "build_total_elapsed_ms=" << telemetry.m_buildStats.m_totalElapsedMs << '\n';
 	stream << "build_analyze_elapsed_ms=" << telemetry.m_buildStats.m_analyzeElapsedMs << '\n';
-	stream << "build_deduplicate_paths_elapsed_ms=" << telemetry.m_buildStats.m_deduplicatePathsElapsedMs << '\n';
 	stream << "build_fallback_count=" << telemetry.m_buildStats.m_fallbackCount << '\n';
 	stream << "font_face_count=" << telemetry.m_buildStats.m_fontFaceCount << '\n';
 	stream << "total_elapsed_ms=" << telemetry.m_totalElapsedMs << '\n';

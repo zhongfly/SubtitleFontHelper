@@ -580,7 +580,7 @@ namespace
 			{
 				return 1;
 			}
-			return cffTable != nullptr ? 1u : 0u;
+			return (cffTable != nullptr || directory.m_hasCff2Table) ? 1u : 0u;
 		}
 
 	public:

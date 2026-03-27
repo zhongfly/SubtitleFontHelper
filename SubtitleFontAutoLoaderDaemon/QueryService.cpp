@@ -516,16 +516,10 @@ public:
 			AppendFontFace(ret, family, dedup);
 			return ret;
 		}
+		// This RPC only preloads candidates for later GDI/libass resolution,
+		// so it must return the superset from both name namespaces here.
 		auto postscript = m_postScriptName.QueryEntry(queryString.c_str(), doTruncated);
-		std::erase_if(postscript, [](FontDatabase::FontFaceElement* element)
-		{
-			return element->m_psOutline != 1;
-		});
 		auto fullname = m_fullName.QueryEntry(queryString.c_str(), doTruncated);
-		std::erase_if(fullname, [](FontDatabase::FontFaceElement* element)
-		{
-			return element->m_psOutline == 1;
-		});
 		auto highestPriority = GetHighestPriority(postscript, fullname);
 		if (highestPriority.has_value())
 		{

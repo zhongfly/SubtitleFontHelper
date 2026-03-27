@@ -376,6 +376,13 @@ namespace sfh
 		}).detach();
 	}
 
+	static bool MatchesAnyKnownFaceName(const FontFace& face, const std::string& faceName)
+	{
+		return std::ranges::find(face.familyname(), faceName) != face.familyname().end()
+			|| std::ranges::find(face.postscriptname(), faceName) != face.postscriptname().end()
+			|| std::ranges::find(face.gdifullname(), faceName) != face.gdifullname().end();
+	}
+
 	void TryLoad(const wchar_t* query, const FontQueryResponse& response)
 	{
 		struct EnumInfo
@@ -401,11 +408,7 @@ namespace sfh
 				{
 					if (info.maskedFace[i])continue;
 					auto& face = info.response->fonts()[i];
-					if ((std::ranges::find(face.familyname(), faceName) != face.familyname().end()
-							|| face.ispsoutline()
-							&& std::ranges::find(face.postscriptname(), faceName) != face.postscriptname().end()
-							|| std::ranges::find(face.gdifullname(), faceName) != face.
-							gdifullname().end())
+					if (MatchesAnyKnownFaceName(face, faceName)
 						&& (!!face.oblique() == !!lpelfe->lfItalic && face.weight() == lpelfe->lfWeight)
 					)
 					{

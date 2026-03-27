@@ -12,6 +12,7 @@
 #include FT_TRUETYPE_IDS_H
 #include FT_SFNT_NAMES_H
 #include FT_TRUETYPE_TABLES_H
+#include FT_TRUETYPE_TAGS_H
 #include FT_TYPE1_TABLES_H
 
 #include <algorithm>
@@ -116,6 +117,12 @@ namespace FontIndexCore
 			private:
 				std::vector<unsigned char> m_buffer;
 
+				static bool HasSfntTable(FT_Face face, FT_ULong tag)
+				{
+					FT_ULong length = 0;
+					return FT_Load_Sfnt_Table(face, tag, 0, nullptr, &length) == FT_Err_Ok;
+				}
+
 				std::wstring ConvertMBCSName(const FT_SfntName& name)
 				{
 					if (name.string_len == 0)return {};
@@ -191,6 +198,17 @@ namespace FontIndexCore
 					}
 				}
 
+				static uint32_t ComputePsOutline(FT_Face face)
+				{
+					if (HasSfntTable(face, TTAG_CFF) || HasSfntTable(face, TTAG_CFF2))
+					{
+						return 1;
+					}
+
+					PS_FontInfoRec psInfo;
+					return FT_Get_PS_Font_Info(face, &psInfo) != FT_Err_Invalid_Argument ? 1u : 0u;
+				}
+
 			public:
 				FT_Library m_lib;
 
@@ -245,8 +263,7 @@ namespace FontIndexCore
 
 						faceElement.m_oblique = face->style_flags & FT_STYLE_FLAG_ITALIC ? 1 : 0;
 
-						PS_FontInfoRec psInfo;
-						faceElement.m_psOutline = FT_Get_PS_Font_Info(face, &psInfo) != FT_Err_Invalid_Argument;
+						faceElement.m_psOutline = ComputePsOutline(face);
 
 						FT_UInt nameCount = FT_Get_Sfnt_Name_Count(face);
 						for (FT_UInt nameIndex = 0; nameIndex < nameCount; ++nameIndex)

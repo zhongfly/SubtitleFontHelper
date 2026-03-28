@@ -75,6 +75,10 @@ public:
 	bool Put(T&& value)
 	{
 		std::lock_guard lg(m_lock);
+		if (m_capacity == 0)
+		{
+			return false;
+		}
 		auto findResult = m_hashmap.find(value);
 		if (m_hashmap.end() == findResult)
 		{

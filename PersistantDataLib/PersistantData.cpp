@@ -1219,7 +1219,7 @@ namespace
 			switch (m_status.back())
 			{
 			case ElementType::Document:
-				if (wcsncmp(pwchLocalName, L"FontDatabase", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"FontDatabase"))
 				{
 					m_status.emplace_back(ElementType::RootElement);
 				}
@@ -1229,7 +1229,7 @@ namespace
 				}
 				break;
 			case ElementType::RootElement:
-				if (wcsncmp(pwchLocalName, L"FontFace", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"FontFace"))
 				{
 					m_db->m_fonts.emplace_back();
 					m_status.emplace_back(ElementType::FontFaceElement);
@@ -1260,21 +1260,21 @@ namespace
 				}
 				break;
 			case ElementType::FontFaceElement:
-				if (wcsncmp(pwchLocalName, L"Win32FamilyName", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"Win32FamilyName"))
 				{
 					m_status.emplace_back(ElementType::Win32FamilyNameElement);
 					m_db->m_fonts.back().m_names.emplace_back();
 					m_db->m_fonts.back().m_names.back().m_type =
 						sfh::FontDatabase::FontFaceElement::NameElement::Win32FamilyName;
 				}
-				else if (wcsncmp(pwchLocalName, L"FullName", cchLocalName) == 0)
+				else if (XmlNameEquals(pwchLocalName, cchLocalName, L"FullName"))
 				{
 					m_status.emplace_back(ElementType::FullNameElement);
 					m_db->m_fonts.back().m_names.emplace_back();
 					m_db->m_fonts.back().m_names.back().m_type =
 						sfh::FontDatabase::FontFaceElement::NameElement::FullName;
 				}
-				else if (wcsncmp(pwchLocalName, L"PostScriptName", cchLocalName) == 0)
+				else if (XmlNameEquals(pwchLocalName, cchLocalName, L"PostScriptName"))
 				{
 					m_status.emplace_back(ElementType::PostScriptNameElement);
 					m_db->m_fonts.back().m_names.emplace_back();
@@ -1301,7 +1301,7 @@ namespace
 			switch (m_status.back())
 			{
 			case ElementType::RootElement:
-				if (wcsncmp(pwchLocalName, L"FontDatabase", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"FontDatabase"))
 				{
 					m_status.pop_back();
 				}
@@ -1311,7 +1311,7 @@ namespace
 				}
 				break;
 			case ElementType::FontFaceElement:
-				if (wcsncmp(pwchLocalName, L"FontFace", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"FontFace"))
 				{
 					m_status.pop_back();
 				}
@@ -1321,7 +1321,7 @@ namespace
 				}
 				break;
 			case ElementType::Win32FamilyNameElement:
-				if (wcsncmp(pwchLocalName, L"Win32FamilyName", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"Win32FamilyName"))
 				{
 					m_status.pop_back();
 				}
@@ -1331,7 +1331,7 @@ namespace
 				}
 				break;
 			case ElementType::FullNameElement:
-				if (wcsncmp(pwchLocalName, L"FullName", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"FullName"))
 				{
 					m_status.pop_back();
 				}
@@ -1341,7 +1341,7 @@ namespace
 				}
 				break;
 			case ElementType::PostScriptNameElement:
-				if (wcsncmp(pwchLocalName, L"PostScriptName", cchLocalName) == 0)
+				if (XmlNameEquals(pwchLocalName, cchLocalName, L"PostScriptName"))
 				{
 					m_status.pop_back();
 				}
@@ -1365,7 +1365,7 @@ namespace
 			case ElementType::Win32FamilyNameElement:
 			case ElementType::FullNameElement:
 			case ElementType::PostScriptNameElement:
-				m_db->m_fonts.back().m_names.back().m_name.assign(pwchChars, cchChars);
+				m_db->m_fonts.back().m_names.back().m_name.append(pwchChars, cchChars);
 			}
 			// ignore unexpected characters
 			return S_OK;

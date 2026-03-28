@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <string_view>
 #include <set>
+#include <stdexcept>
 
 namespace
 {
@@ -44,7 +45,10 @@ namespace
 				auto result = right;
 				while (left != right)
 				{
-					assert(!mid->first.empty());
+					if (mid->first.empty())
+					{
+						throw std::logic_error("QueryTrie contains empty arc");
+					}
 					if (mid->first[0] == leading)
 					{
 						result = mid;
@@ -81,7 +85,10 @@ namespace
 			// just search first character
 			while (node)
 			{
-				assert(*keyPointer != 0);
+				if (*keyPointer == 0)
+				{
+					return;
+				}
 				auto result = node->SearchPrefix(*keyPointer);
 				if (result == nullptr)
 				{
@@ -165,7 +172,10 @@ namespace
 			// just search first character
 			while (node)
 			{
-				assert(*keyPointer != 0);
+				if (*keyPointer == 0)
+				{
+					return ret;
+				}
 				auto result = node->SearchPrefix(*keyPointer);
 				if (result == nullptr)
 				{

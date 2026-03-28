@@ -134,15 +134,7 @@ namespace FontIndexCore
 						throw std::logic_error("unexpected name encoding");
 					}
 
-					m_buffer.clear();
-					for (FT_UInt i = 0; i < name.string_len - 1; i += 2)
-					{
-						if (name.string[i])
-						{
-							m_buffer.push_back(name.string[i]);
-						}
-						m_buffer.push_back(name.string[i + 1]);
-					}
+					m_buffer.assign(name.string, name.string + name.string_len);
 
 					int length = MultiByteToWideChar(
 						codePage,

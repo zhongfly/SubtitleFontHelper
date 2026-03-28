@@ -333,16 +333,7 @@ namespace
 				throw std::logic_error("unexpected name encoding");
 			}
 
-			m_mbcsBuffer.clear();
-			m_mbcsBuffer.reserve(bytes.size());
-			for (size_t i = 0; i + 1 < bytes.size(); i += 2)
-			{
-				if (bytes[i] != 0)
-				{
-					m_mbcsBuffer.push_back(static_cast<char>(bytes[i]));
-				}
-				m_mbcsBuffer.push_back(static_cast<char>(bytes[i + 1]));
-			}
+			m_mbcsBuffer.assign(bytes.begin(), bytes.end());
 
 			if (m_mbcsBuffer.empty())
 			{

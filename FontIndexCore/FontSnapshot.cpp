@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
+#include <xxhash.h>
 #include <wil/resource.h>
 
 namespace FontIndexCore
@@ -17,13 +19,62 @@ namespace FontIndexCore
 	{
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x314E5350484653ULL;
 		constexpr uint32_t LEGACY_SNAPSHOT_VERSION = 1;
-		constexpr uint32_t SNAPSHOT_VERSION = 2;
+		constexpr uint32_t SNAPSHOT_VERSION_WITHOUT_CHECKSUM = 2;
+		constexpr uint32_t SNAPSHOT_VERSION = 3;
 		constexpr uint64_t MAX_SNAPSHOT_ENTRY_COUNT = 1000000;
 		constexpr uint32_t MAX_SNAPSHOT_PATH_BYTES = 1024 * 1024;
 		constexpr uint8_t SNAPSHOT_FLAG_HAS_CONTENT_HASH = 0x1;
 		constexpr uint64_t SNAPSHOT_ENTRY_BASE_SIZE =
 			sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint8_t);
 		constexpr uint64_t SNAPSHOT_CONTENT_HASH_SIZE = sizeof(uint64_t) + sizeof(uint64_t);
+		constexpr uint64_t SNAPSHOT_CHECKSUM_SIZE = sizeof(uint64_t);
+
+		class SnapshotChecksum
+		{
+		private:
+			XXH64_state_t* m_state = nullptr;
+
+		public:
+			SnapshotChecksum()
+				: m_state(XXH64_createState())
+			{
+				if (!m_state)
+				{
+					throw std::runtime_error("failed to allocate snapshot checksum");
+				}
+				if (XXH64_reset(m_state, 0) != XXH_OK)
+				{
+					XXH64_freeState(m_state);
+					m_state = nullptr;
+					throw std::runtime_error("failed to initialize snapshot checksum");
+				}
+			}
+
+			~SnapshotChecksum()
+			{
+				if (m_state)
+				{
+					XXH64_freeState(m_state);
+				}
+			}
+
+			void Update(const void* data, size_t size)
+			{
+				if (size == 0)
+				{
+					return;
+				}
+				if (XXH64_update(m_state, data, size) != XXH_OK)
+				{
+					throw std::runtime_error("failed to update snapshot checksum");
+				}
+			}
+
+			uint64_t Digest() const
+			{
+				return XXH64_digest(m_state);
+			}
+		};
 
 		std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
 		{
@@ -147,25 +198,51 @@ namespace FontIndexCore
 			return true;
 		}
 
-		template <typename T>
-		void WriteScalar(std::ofstream& stream, const T& value)
+		void WriteBytes(
+			std::ofstream& stream,
+			const void* data,
+			size_t size,
+			SnapshotChecksum* checksum = nullptr)
 		{
-			stream.write(reinterpret_cast<const char*>(&value), sizeof(T));
+			stream.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
 			if (!stream)
 			{
 				throw std::runtime_error("failed to write snapshot");
 			}
+			if (checksum)
+			{
+				checksum->Update(data, size);
+			}
 		}
 
 		template <typename T>
-		T ReadScalar(std::ifstream& stream)
+		void WriteScalar(std::ofstream& stream, const T& value, SnapshotChecksum* checksum = nullptr)
 		{
-			T value{};
-			stream.read(reinterpret_cast<char*>(&value), sizeof(T));
+			WriteBytes(stream, &value, sizeof(T), checksum);
+		}
+
+		void ReadBytes(
+			std::ifstream& stream,
+			void* data,
+			size_t size,
+			SnapshotChecksum* checksum = nullptr)
+		{
+			stream.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(size));
 			if (!stream)
 			{
 				throw std::runtime_error("failed to read snapshot");
 			}
+			if (checksum)
+			{
+				checksum->Update(data, size);
+			}
+		}
+
+		template <typename T>
+		T ReadScalar(std::ifstream& stream, SnapshotChecksum* checksum = nullptr)
+		{
+			T value{};
+			ReadBytes(stream, &value, sizeof(T), checksum);
 			return value;
 		}
 
@@ -185,14 +262,29 @@ namespace FontIndexCore
 			return static_cast<uint64_t>(end);
 		}
 
+		void ReadBytes(
+			std::ifstream& stream,
+			void* data,
+			size_t size,
+			uint64_t& remainingBytes,
+			SnapshotChecksum* checksum = nullptr)
+		{
+			if (remainingBytes < size)
+			{
+				throw std::runtime_error("snapshot is truncated");
+			}
+			ReadBytes(stream, data, size, checksum);
+			remainingBytes -= size;
+		}
+
 		template <typename T>
-		T ReadScalar(std::ifstream& stream, uint64_t& remainingBytes)
+		T ReadScalar(std::ifstream& stream, uint64_t& remainingBytes, SnapshotChecksum* checksum = nullptr)
 		{
 			if (remainingBytes < sizeof(T))
 			{
 				throw std::runtime_error("snapshot is truncated");
 			}
-			auto value = ReadScalar<T>(stream);
+			auto value = ReadScalar<T>(stream, checksum);
 			remainingBytes -= sizeof(T);
 			return value;
 		}
@@ -281,14 +373,29 @@ namespace FontIndexCore
 			throw std::runtime_error("invalid snapshot header");
 		}
 		const auto version = ReadScalar<uint32_t>(stream, remainingBytes);
-		if (version != LEGACY_SNAPSHOT_VERSION && version != SNAPSHOT_VERSION)
+		if (version != LEGACY_SNAPSHOT_VERSION
+			&& version != SNAPSHOT_VERSION_WITHOUT_CHECKSUM
+			&& version != SNAPSHOT_VERSION)
 		{
 			throw std::runtime_error("unsupported snapshot version");
 		}
 
+		std::optional<SnapshotChecksum> checksum;
+		SnapshotChecksum* checksumContext = nullptr;
+		if (version == SNAPSHOT_VERSION)
+		{
+			if (remainingBytes < SNAPSHOT_CHECKSUM_SIZE)
+			{
+				throw std::runtime_error("snapshot is truncated");
+			}
+			remainingBytes -= SNAPSHOT_CHECKSUM_SIZE;
+			checksum.emplace();
+			checksumContext = &*checksum;
+		}
+
 		DirectorySnapshot snapshot;
 		const auto baseDirectory = GetPersistedBaseDirectory(snapshotPath);
-		const auto count = ReadScalar<uint64_t>(stream, remainingBytes);
+		const auto count = ReadScalar<uint64_t>(stream, remainingBytes, checksumContext);
 		if (count > MAX_SNAPSHOT_ENTRY_COUNT)
 		{
 			throw std::runtime_error("snapshot entry count is too large");
@@ -300,7 +407,7 @@ namespace FontIndexCore
 		snapshot.m_files.reserve(static_cast<size_t>(count));
 		for (uint64_t i = 0; i < count; ++i)
 		{
-			const auto pathLength = ReadScalar<uint32_t>(stream, remainingBytes);
+			const auto pathLength = ReadScalar<uint32_t>(stream, remainingBytes, checksumContext);
 			if (pathLength > MAX_SNAPSHOT_PATH_BYTES)
 			{
 				throw std::runtime_error("snapshot path is too large");
@@ -310,18 +417,13 @@ namespace FontIndexCore
 				throw std::runtime_error("snapshot path length exceeds remaining data");
 			}
 			std::string utf8Path(pathLength, '\0');
-			stream.read(utf8Path.data(), static_cast<std::streamsize>(pathLength));
-			if (!stream)
-			{
-				throw std::runtime_error("failed to read snapshot path");
-			}
-			remainingBytes -= pathLength;
+			ReadBytes(stream, utf8Path.data(), pathLength, remainingBytes, checksumContext);
 
 			DirectorySnapshotEntry entry;
 			entry.m_path = ResolvePersistedPath(Utf8ToWide(utf8Path), baseDirectory);
-			entry.m_fileSize = ReadScalar<uint64_t>(stream, remainingBytes);
-			entry.m_lastWriteTime = ReadScalar<uint64_t>(stream, remainingBytes);
-			const auto flags = ReadScalar<uint8_t>(stream, remainingBytes);
+			entry.m_fileSize = ReadScalar<uint64_t>(stream, remainingBytes, checksumContext);
+			entry.m_lastWriteTime = ReadScalar<uint64_t>(stream, remainingBytes, checksumContext);
+			const auto flags = ReadScalar<uint8_t>(stream, remainingBytes, checksumContext);
 			if ((flags & ~SNAPSHOT_FLAG_HAS_CONTENT_HASH) != 0)
 			{
 				throw std::runtime_error("snapshot contains unsupported flags");
@@ -333,10 +435,18 @@ namespace FontIndexCore
 				{
 					throw std::runtime_error("snapshot content hash exceeds remaining data");
 				}
-				entry.m_contentHash.m_low64 = ReadScalar<uint64_t>(stream, remainingBytes);
-				entry.m_contentHash.m_high64 = ReadScalar<uint64_t>(stream, remainingBytes);
+				entry.m_contentHash.m_low64 = ReadScalar<uint64_t>(stream, remainingBytes, checksumContext);
+				entry.m_contentHash.m_high64 = ReadScalar<uint64_t>(stream, remainingBytes, checksumContext);
 			}
 			snapshot.m_files.push_back(std::move(entry));
+		}
+		if (version == SNAPSHOT_VERSION)
+		{
+			const auto storedChecksum = ReadScalar<uint64_t>(stream, remainingBytes);
+			if (storedChecksum != checksum->Digest())
+			{
+				throw std::runtime_error("snapshot checksum mismatch");
+			}
 		}
 		if (remainingBytes != 0)
 		{
@@ -366,13 +476,14 @@ namespace FontIndexCore
 			throw std::runtime_error("failed to create snapshot");
 		}
 
+		SnapshotChecksum checksum;
 		WriteScalar(stream, SNAPSHOT_MAGIC);
 		WriteScalar(stream, SNAPSHOT_VERSION);
 		if (snapshot.m_files.size() > MAX_SNAPSHOT_ENTRY_COUNT)
 		{
 			throw std::runtime_error("snapshot entry count is too large");
 		}
-		WriteScalar(stream, static_cast<uint64_t>(snapshot.m_files.size()));
+		WriteScalar(stream, static_cast<uint64_t>(snapshot.m_files.size()), &checksum);
 		for (const auto& entry : snapshot.m_files)
 		{
 			const auto persistedPath = MakePersistedPath(entry.m_path, baseDirectory);
@@ -381,21 +492,18 @@ namespace FontIndexCore
 			{
 				throw std::runtime_error("snapshot path is too large");
 			}
-			WriteScalar(stream, static_cast<uint32_t>(utf8Path.size()));
-			stream.write(utf8Path.data(), static_cast<std::streamsize>(utf8Path.size()));
-			if (!stream)
-			{
-				throw std::runtime_error("failed to write snapshot path");
-			}
-			WriteScalar(stream, entry.m_fileSize);
-			WriteScalar(stream, entry.m_lastWriteTime);
-			WriteScalar(stream, static_cast<uint8_t>(entry.m_hasContentHash ? SNAPSHOT_FLAG_HAS_CONTENT_HASH : 0x0));
+			WriteScalar(stream, static_cast<uint32_t>(utf8Path.size()), &checksum);
+			WriteBytes(stream, utf8Path.data(), utf8Path.size(), &checksum);
+			WriteScalar(stream, entry.m_fileSize, &checksum);
+			WriteScalar(stream, entry.m_lastWriteTime, &checksum);
+			WriteScalar(stream, static_cast<uint8_t>(entry.m_hasContentHash ? SNAPSHOT_FLAG_HAS_CONTENT_HASH : 0x0), &checksum);
 			if (entry.m_hasContentHash)
 			{
-				WriteScalar(stream, entry.m_contentHash.m_low64);
-				WriteScalar(stream, entry.m_contentHash.m_high64);
+				WriteScalar(stream, entry.m_contentHash.m_low64, &checksum);
+				WriteScalar(stream, entry.m_contentHash.m_high64, &checksum);
 			}
 		}
+		WriteScalar(stream, checksum.Digest());
 		stream.close();
 		if (!stream)
 		{

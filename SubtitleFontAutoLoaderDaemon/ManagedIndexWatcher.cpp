@@ -25,6 +25,8 @@ namespace sfh
 	{
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x314E5350484653ULL;
 		constexpr uint32_t LEGACY_SNAPSHOT_VERSION = 1;
+		constexpr uint32_t SNAPSHOT_VERSION_WITHOUT_CHECKSUM = 2;
+		constexpr uint32_t SNAPSHOT_VERSION = 3;
 
 		constexpr DWORD WATCH_FILTER =
 			FILE_NOTIFY_CHANGE_FILE_NAME
@@ -615,7 +617,7 @@ namespace sfh
 			}
 		}
 
-		bool IsLegacyPersistedSnapshot() const
+		bool NeedsPersistedSnapshotUpgrade() const
 		{
 			std::ifstream stream(m_task.m_snapshotPath, std::ios::binary);
 			if (!stream)
@@ -637,7 +639,7 @@ namespace sfh
 				return false;
 			}
 
-			return version == LEGACY_SNAPSHOT_VERSION;
+			return version < SNAPSHOT_VERSION;
 		}
 
 		void TryUpgradePersistedSnapshot(const FontIndexCore::DirectorySnapshot& snapshot) const
@@ -920,7 +922,7 @@ namespace sfh
 			FontIndexCore::DirectorySnapshot persistedSnapshot;
 			const bool hasPersistedSnapshot = TryReadPersistedSnapshot(persistedSnapshot);
 			const bool shouldUpgradePersistedSnapshot =
-				hasPersistedSnapshot && IsLegacyPersistedSnapshot();
+				hasPersistedSnapshot && NeedsPersistedSnapshotUpgrade();
 			if (hasPersistedSnapshot)
 			{
 				ApplyCachedHashes(persistedSnapshot, currentSnapshot);

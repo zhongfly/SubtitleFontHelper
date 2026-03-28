@@ -130,18 +130,79 @@ namespace sfh
 		}
 	};
 
-	void WritePipe(HANDLE pipe, const void* src, DWORD size)
+	constexpr DWORD PIPE_OPERATION_TIMEOUT_MS = 5000;
+
+	DWORD ReadWritePipe(
+		wil::unique_hfile& pipe,
+		void* buffer,
+		DWORD size,
+		bool isWrite)
 	{
-		DWORD writeBytes;
-		THROW_LAST_ERROR_IF(WriteFile(pipe, src, size, &writeBytes, nullptr) == FALSE);
+		OVERLAPPED overlapped{};
+		wil::unique_handle ioEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+		THROW_LAST_ERROR_IF(!ioEvent.is_valid());
+		overlapped.hEvent = ioEvent.get();
+
+		DWORD transferredBytes = 0;
+		const BOOL result = isWrite
+			? WriteFile(pipe.get(), buffer, size, &transferredBytes, &overlapped)
+			: ReadFile(pipe.get(), buffer, size, &transferredBytes, &overlapped);
+		if (result == FALSE)
+		{
+			const auto error = GetLastError();
+			if (error != ERROR_IO_PENDING)
+			{
+				THROW_WIN32(error);
+			}
+
+			const auto waitResult = WaitForSingleObject(ioEvent.get(), PIPE_OPERATION_TIMEOUT_MS);
+			if (waitResult == WAIT_TIMEOUT)
+			{
+				if (CancelIoEx(pipe.get(), &overlapped) == FALSE)
+				{
+					const auto cancelError = GetLastError();
+					if (cancelError != ERROR_NOT_FOUND)
+					{
+						// Continue waiting below so the stack-based OVERLAPPED cannot outlive this scope.
+					}
+				}
+
+				const auto cancelWaitResult = WaitForSingleObject(ioEvent.get(), PIPE_OPERATION_TIMEOUT_MS);
+				if (cancelWaitResult == WAIT_TIMEOUT)
+				{
+					pipe.reset();
+					const auto closeWaitResult = WaitForSingleObject(ioEvent.get(), INFINITE);
+					THROW_LAST_ERROR_IF(closeWaitResult == WAIT_FAILED);
+					throw std::runtime_error(isWrite ? "pipe write timed out" : "pipe read timed out");
+				}
+				THROW_LAST_ERROR_IF(cancelWaitResult == WAIT_FAILED);
+				if (GetOverlappedResult(pipe.get(), &overlapped, &transferredBytes, FALSE) == FALSE)
+				{
+					const auto completeError = GetLastError();
+					if (completeError != ERROR_OPERATION_ABORTED)
+					{
+						THROW_WIN32(completeError);
+					}
+				}
+				throw std::runtime_error(isWrite ? "pipe write timed out" : "pipe read timed out");
+			}
+			THROW_LAST_ERROR_IF(waitResult == WAIT_FAILED);
+			THROW_LAST_ERROR_IF(GetOverlappedResult(pipe.get(), &overlapped, &transferredBytes, FALSE) == FALSE);
+		}
+
+		return transferredBytes;
+	}
+
+	void WritePipe(wil::unique_hfile& pipe, const void* src, DWORD size)
+	{
+		DWORD writeBytes = ReadWritePipe(pipe, const_cast<void*>(src), size, true);
 		if (writeBytes != size)
 			throw std::runtime_error("can't write much data");
 	}
 
-	void ReadPipe(HANDLE pipe, void* dst, DWORD size)
+	void ReadPipe(wil::unique_hfile& pipe, void* dst, DWORD size)
 	{
-		DWORD readBytes;
-		THROW_LAST_ERROR_IF(ReadFile(pipe, dst, size, &readBytes, nullptr) == FALSE);
+		DWORD readBytes = ReadWritePipe(pipe, dst, size, false);
 		if (readBytes != size)
 			throw std::runtime_error("can't read enough data");
 	}
@@ -231,21 +292,21 @@ namespace sfh
 			0,
 			nullptr,
 			OPEN_EXISTING,
-			0,
+			FILE_FLAG_OVERLAPPED,
 			nullptr));
 		if (!pipe.is_valid())
 		{
 			if (GetLastError() == ERROR_PIPE_BUSY)
 			{
 				// wait previous request finish
-				THROW_LAST_ERROR_IF(WaitNamedPipeW(pipeName.c_str(), NMPWAIT_USE_DEFAULT_WAIT) == FALSE);
+				THROW_LAST_ERROR_IF(WaitNamedPipeW(pipeName.c_str(), PIPE_OPERATION_TIMEOUT_MS) == FALSE);
 				pipe.reset(CreateFileW(
 					pipeName.c_str(),
 					GENERIC_READ | GENERIC_WRITE,
 					0,
 					nullptr,
 					OPEN_EXISTING,
-					0,
+					FILE_FLAG_OVERLAPPED,
 					nullptr));
 			}
 			THROW_LAST_ERROR_IF(!pipe.is_valid());
@@ -303,17 +364,17 @@ namespace sfh
 		std::string requestBuffer = std::move(oss).str();
 
 		auto requestLength = static_cast<uint32_t>(requestBuffer.size());
-		WritePipe(pipe.get(), &requestLength, sizeof(uint32_t));
-		WritePipe(pipe.get(), requestBuffer.data(), static_cast<DWORD>(requestLength));
+		WritePipe(pipe, &requestLength, sizeof(uint32_t));
+		WritePipe(pipe, requestBuffer.data(), static_cast<DWORD>(requestLength));
 	}
 
 	template <typename ReturnType>
 	ReturnType FetchResponse(wil::unique_hfile& pipe)
 	{
 		uint32_t responseLength;
-		ReadPipe(pipe.get(), &responseLength, sizeof(uint32_t));
+		ReadPipe(pipe, &responseLength, sizeof(uint32_t));
 		std::vector<char> responseBuffer(responseLength);
-		ReadPipe(pipe.get(), responseBuffer.data(), responseLength);
+		ReadPipe(pipe, responseBuffer.data(), responseLength);
 
 		ReturnType response;
 		if (!response.ParseFromArray(responseBuffer.data(), responseLength))

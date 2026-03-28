@@ -12,6 +12,7 @@
 #include <Windows.h>
 
 #include <unordered_map>
+#include <mutex>
 #include <wil/resource.h>
 
 namespace sfh
@@ -166,6 +167,7 @@ namespace sfh
 		feedback.SetStage(ManagedIndexBuildStage::Scanning);
 		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
 		std::vector<std::string> failures;
+		std::mutex failureLock;
 		feedback.SetStage(ManagedIndexBuildStage::Hashing, CountHashWorkItems(snapshot));
 		FontIndexCore::PopulateMissingContentHashes(
 			snapshot,
@@ -174,6 +176,7 @@ namespace sfh
 			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				std::lock_guard lg(failureLock);
 				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 			});
 		auto groups = FontIndexCore::GroupEquivalentFiles(
@@ -181,6 +184,7 @@ namespace sfh
 			isCancelled,
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				std::lock_guard lg(failureLock);
 				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 			});
 		if (!failures.empty())
@@ -203,6 +207,7 @@ namespace sfh
 			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				std::lock_guard lg(failureLock);
 				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 			});
 		if (!failures.empty())

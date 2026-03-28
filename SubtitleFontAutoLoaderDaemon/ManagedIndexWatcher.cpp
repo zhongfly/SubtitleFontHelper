@@ -16,6 +16,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <mutex>
 #include <wil/resource.h>
 
 namespace sfh
@@ -710,6 +711,7 @@ namespace sfh
 			};
 
 			std::vector<std::string> failures;
+			std::mutex failureLock;
 			feedback.SetStage(ManagedIndexBuildStage::Hashing, CountHashWorkItems(snapshot));
 			FontIndexCore::PopulateMissingContentHashes(
 				snapshot,
@@ -718,6 +720,7 @@ namespace sfh
 				feedback.GetProgressCounter(),
 				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					std::lock_guard lg(failureLock);
 					failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 				});
 			auto groups = FontIndexCore::GroupEquivalentFiles(
@@ -725,6 +728,7 @@ namespace sfh
 				isCancelled,
 				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					std::lock_guard lg(failureLock);
 					failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 				});
 			if (!failures.empty())
@@ -855,6 +859,7 @@ namespace sfh
 				if (!pathsToAnalyze.empty())
 				{
 					std::vector<std::string> analyzeFailures;
+					std::mutex analyzeFailureLock;
 					feedback.SetStage(ManagedIndexBuildStage::Analyzing, pathsToAnalyze.size());
 					auto analyzed = FontIndexCore::BuildFontDatabase(
 						pathsToAnalyze,
@@ -863,6 +868,7 @@ namespace sfh
 						feedback.GetProgressCounter(),
 						[&](const std::filesystem::path& path, const std::string& errorMessage)
 						{
+							std::lock_guard lg(analyzeFailureLock);
 							analyzeFailures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 						});
 					if (!analyzeFailures.empty())

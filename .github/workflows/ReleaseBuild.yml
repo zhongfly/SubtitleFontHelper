@@ -76,18 +76,20 @@ jobs:
     name: Package Release build
     runs-on: windows-latest
     needs: build
+    permissions:
+      contents: write
 
     steps:
     - uses: actions/checkout@v6
 
     - name: Download x86 build output
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: Build-Win32-Release
         path: Build\Win32\${{ env.BUILD_CONFIGURATION }}\
 
     - name: Download x64 build output
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: Build-x64-Release
         path: Build\x64\${{ env.BUILD_CONFIGURATION }}\
@@ -98,8 +100,34 @@ jobs:
       run: |
         .\copyFiles.ps1
 
+    - name: Create release archive
+      id: archive
+      shell: pwsh
+      run: |
+        $archiveName = "SubtitleFontHelper-$env:GITHUB_REF_NAME.zip"
+        $archivePath = Join-Path $env:GITHUB_WORKSPACE $archiveName
+        if (Test-Path $archivePath)
+        {
+          Remove-Item -LiteralPath $archivePath -Force
+        }
+
+        Compress-Archive -Path ReleaseBuild\* -DestinationPath $archivePath -CompressionLevel Optimal
+
+        "archive_name=$archiveName" >> $env:GITHUB_OUTPUT
+        "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
+
     - name: Upload artifact
       uses: actions/upload-artifact@v7
       with:
-        name: ReleaseBuild
-        path: ReleaseBuild\
+        name: ${{ steps.archive.outputs.archive_name }}
+        path: ${{ steps.archive.outputs.archive_path }}
+
+    - name: Publish draft release
+      uses: ncipollo/release-action@v1
+      with:
+        allowUpdates: true
+        artifactErrorsFailBuild: true
+        artifacts: ${{ steps.archive.outputs.archive_path }}
+        draft: true
+        tag: ${{ github.ref_name }}
+        updateOnlyUnreleased: true

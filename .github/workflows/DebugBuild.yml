@@ -44,9 +44,11 @@ jobs:
       matrix:
         include:
           - platform: x86
+            triplet: x86-windows-static-md
             build_dir: Win32
             artifact_name: Build-Win32-Debug
           - platform: x64
+            triplet: x64-windows-static-md
             build_dir: x64
             artifact_name: Build-x64-Debug
 
@@ -65,14 +67,17 @@ jobs:
     - uses: actions/cache@v5
       id: cache
       with:
-        path: vcpkg_binary_cache\
-        key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-${{ matrix.platform }}-binarycache-${{ hashFiles('vcpkg.json') }}
+        path: |
+          vcpkg_binary_cache\
+          vcpkg_installed\
+        key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
 
-    - name: Create vcpkg binary cache directory
+    - name: Prepare vcpkg directories
       shell: pwsh
       run: |
         $env:VCPKG_DEFAULT_BINARY_CACHE="$env:GITHUB_WORKSPACE\vcpkg_binary_cache"
         New-Item -Type Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE"
+        New-Item -Type Directory -Force "$env:GITHUB_WORKSPACE\vcpkg_installed"
         echo "VCPKG_DEFAULT_BINARY_CACHE=$env:VCPKG_DEFAULT_BINARY_CACHE" >> $env:GITHUB_ENV
         echo "VCPKG_INSTALLATION_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
 
@@ -82,9 +87,15 @@ jobs:
       run: |
         & "$env:VCPKG_ROOT\vcpkg.exe" integrate install
 
+    - name: Install vcpkg dependencies
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      shell: pwsh
+      run: |
+        & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet ${{ matrix.triplet }}
+
     - name: Build ${{ matrix.platform }}
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} ${{env.SOLUTION_FILE_PATH}}
+      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} /p:VcpkgManifestInstall=false ${{env.SOLUTION_FILE_PATH}}
 
     - name: Upload build output
       uses: actions/upload-artifact@v7
@@ -101,13 +112,13 @@ jobs:
     - uses: actions/checkout@v6
 
     - name: Download x86 build output
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: Build-Win32-Debug
         path: Build\Win32\${{ env.BUILD_CONFIGURATION }}\
 
     - name: Download x64 build output
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: Build-x64-Debug
         path: Build\x64\${{ env.BUILD_CONFIGURATION }}\

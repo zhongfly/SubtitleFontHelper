@@ -355,6 +355,11 @@ namespace FontIndexCore
 
 		const auto baseDirectory = GetPersistedBaseDirectory(snapshotPath);
 		const auto tempPath = snapshotPath.wstring() + L".tmp";
+		auto cleanupTempFile = wil::scope_exit([&]()
+		{
+			std::error_code ec;
+			std::filesystem::remove(tempPath, ec);
+		});
 		std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
 		if (!stream)
 		{
@@ -401,5 +406,6 @@ namespace FontIndexCore
 			tempPath.c_str(),
 			snapshotPath.c_str(),
 			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
+		cleanupTempFile.release();
 	}
 }

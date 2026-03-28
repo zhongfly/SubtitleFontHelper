@@ -442,7 +442,7 @@ namespace FontIndexCore
 		}
 		if (version == SNAPSHOT_VERSION)
 		{
-			const auto storedChecksum = ReadScalar<uint64_t>(stream, remainingBytes);
+			const auto storedChecksum = ReadScalar<uint64_t>(stream);
 			if (storedChecksum != checksum->Digest())
 			{
 				throw std::runtime_error("snapshot checksum mismatch");

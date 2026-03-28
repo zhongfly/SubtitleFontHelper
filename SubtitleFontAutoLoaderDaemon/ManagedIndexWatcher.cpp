@@ -3,6 +3,7 @@
 #include "ManagedIndexWatcher.h"
 
 #include "Common.h"
+#include "EventLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
 #include "../FontIndexCore/FontIndexCore.h"
@@ -611,8 +612,19 @@ namespace sfh
 				snapshot = FontIndexCore::ReadDirectorySnapshot(m_task.m_snapshotPath);
 				return true;
 			}
+			catch (const std::exception& e)
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index snapshot read failed: path=\"%ls\" error=\"%hs\"",
+					m_task.m_snapshotPath.c_str(),
+					e.what());
+				return false;
+			}
 			catch (...)
 			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index snapshot read failed: path=\"%ls\" error=\"unknown exception\"",
+					m_task.m_snapshotPath.c_str());
 				return false;
 			}
 		}

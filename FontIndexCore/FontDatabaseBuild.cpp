@@ -331,12 +331,12 @@ namespace FontIndexCore
 				}
 			}
 
+			FontParserBackend m_backend = kDefaultFontParserBackend;
 			std::unique_ptr<Internal::FontFileParser> m_primaryParser;
 			std::unique_ptr<Internal::FontFileParser> m_fallbackParser;
 		public:
 			FontAnalyzer()
-				: m_primaryParser(CreateParser(kDefaultFontParserBackend)),
-				  m_fallbackParser(CreateFallbackParser(kDefaultFontParserBackend))
+				: m_primaryParser(CreateParser(m_backend))
 			{
 			}
 
@@ -356,6 +356,10 @@ namespace FontIndexCore
 				}
 				catch (const std::exception&)
 				{
+					if (!m_fallbackParser)
+					{
+						m_fallbackParser = CreateFallbackParser(m_backend);
+					}
 					if (!m_fallbackParser)
 					{
 						throw;
@@ -464,6 +468,7 @@ namespace FontIndexCore
 
 		const auto analyzeBatches = BuildAnalyzeBatches(fontFiles);
 		const size_t workerCountValue = std::max<size_t>(1, workerCount);
+		const size_t actualWorkerCount = std::min(workerCountValue, analyzeBatches.size());
 		const auto analyzeStart = std::chrono::steady_clock::now();
 
 		std::mutex resultLock;
@@ -472,13 +477,13 @@ namespace FontIndexCore
 		std::atomic<size_t> nextBatchIndex = 0;
 
 		std::vector<std::thread> workers;
-		workers.reserve(workerCountValue);
+		workers.reserve(actualWorkerCount);
 
-		for (size_t i = 0; i < workerCountValue; ++i)
+		for (size_t i = 0; i < actualWorkerCount; ++i)
 		{
 			workers.emplace_back([&]()
 			{
-				FontAnalyzer analyzer;
+				std::unique_ptr<FontAnalyzer> analyzer;
 				while (true)
 				{
 					ThrowIfCancelled(isCancelled);
@@ -488,6 +493,10 @@ namespace FontIndexCore
 					{
 						return;
 					}
+					if (!analyzer)
+					{
+						analyzer = std::make_unique<FontAnalyzer>();
+					}
 
 					const auto& batch = analyzeBatches[currentBatchIndex];
 					for (size_t currentIndex = batch.m_beginIndex; currentIndex < batch.m_endIndex; ++currentIndex)
@@ -496,7 +505,7 @@ namespace FontIndexCore
 
 						try
 						{
-							auto result = analyzer.AnalyzeFontFile(fontFiles[currentIndex].c_str());
+							auto result = analyzer->AnalyzeFontFile(fontFiles[currentIndex].c_str());
 							std::lock_guard lg(resultLock);
 							AssignSharedPath(result, InternPath(fontFiles[currentIndex], pathPool));
 							db.m_fonts.insert(

@@ -210,17 +210,24 @@ namespace FontIndexCore
 				}
 
 			public:
-				FT_Library m_lib;
+				FT_Library m_lib = nullptr;
 
 				FreeTypeFontFileParser()
 				{
 					m_buffer.reserve(1024);
-					FT_Init_FreeType(&m_lib);
+					const auto initError = FT_Init_FreeType(&m_lib);
+					if (initError != 0)
+					{
+						throw std::runtime_error("failed to initialize freetype");
+					}
 				}
 
 				~FreeTypeFontFileParser() override
 				{
-					FT_Done_FreeType(m_lib);
+					if (m_lib)
+					{
+						FT_Done_FreeType(m_lib);
+					}
 				}
 
 				std::vector<sfh::FontDatabase::FontFaceElement> AnalyzeFontFile(const wchar_t* path) override

@@ -180,12 +180,21 @@ extern "C" {
 				MEM_COMMIT,
 				PAGE_READWRITE);
 			THROW_LAST_ERROR_IF(!remoteBuf);
+			auto freeRemoteBuf = wil::scope_exit([&]()
+			{
+				VirtualFreeEx(hProcess.get(), remoteBuf, 0, MEM_RELEASE);
+			});
 
-			WriteProcessMemory(
+			SIZE_T writtenBytes = 0;
+			THROW_LAST_ERROR_IF(WriteProcessMemory(
 				hProcess.get(),
 				remoteBuf, selfPath.get(),
 				bufferSize,
-				nullptr);
+				&writtenBytes) == FALSE);
+			if (writtenBytes != bufferSize)
+			{
+				throw std::runtime_error("failed to write dll path to remote process");
+			}
 
 			HMODULE hModuleKernel32 = nullptr;
 			THROW_LAST_ERROR_IF(
@@ -206,8 +215,13 @@ extern "C" {
 				nullptr));
 			THROW_LAST_ERROR_IF(!hThread.is_valid());
 
-			WaitForSingleObject(hThread.get(), INFINITE);
-			// VirtualFreeEx(hProcess.get(), remoteBuf, 0, MEM_RELEASE);
+			THROW_LAST_ERROR_IF(WaitForSingleObject(hThread.get(), INFINITE) != WAIT_OBJECT_0);
+			DWORD remoteExitCode = 0;
+			THROW_LAST_ERROR_IF(GetExitCodeThread(hThread.get(), &remoteExitCode) == FALSE);
+			if (remoteExitCode == 0)
+			{
+				throw std::runtime_error("LoadLibraryW failed in remote process");
+			}
 			sfh::EventLog::GetInstance().LogDllInjectProcessSuccess(processId);
 		}
 		catch (std::exception& e)

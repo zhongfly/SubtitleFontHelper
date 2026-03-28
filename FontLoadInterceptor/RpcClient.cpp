@@ -82,11 +82,11 @@ namespace sfh
 					0, 0,
 					sizeof(uint32_t))));
 				THROW_LAST_ERROR_IF(m_versionMem.get() == nullptr);
+				m_good = true;
 			}
 			catch (...)
 			{
 			}
-			m_good = true;
 		}
 
 	public:
@@ -98,6 +98,11 @@ namespace sfh
 
 		void CheckNewVerison()
 		{
+			if (!m_versionMem)
+			{
+				return;
+			}
+
 			uint32_t newVerison = InterlockedCompareExchange(m_versionMem.get(), 0, 0);
 			if (newVerison != m_lastKnownVersion)
 			{

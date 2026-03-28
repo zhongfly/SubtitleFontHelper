@@ -19,13 +19,6 @@ namespace FontIndexCore
 	{
 		constexpr size_t FILE_BUFFER_SIZE = 8 * 1024 * 1024;
 
-		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
-		{
-			if (isCancelled && isCancelled())
-			{
-				throw std::runtime_error("Operation cancelled");
-			}
-		}
 
 		wil::unique_virtualalloc_ptr<uint8_t> CreateFileBuffer()
 		{

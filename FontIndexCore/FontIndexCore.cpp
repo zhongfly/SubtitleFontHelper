@@ -12,6 +12,14 @@
 
 namespace FontIndexCore
 {
+	void ThrowIfCancelled(const std::function<bool()>& isCancelled)
+	{
+		if (isCancelled && isCancelled())
+		{
+			throw std::runtime_error("Operation cancelled");
+		}
+	}
+
 	namespace
 	{
 		std::wstring NormalizeExtension(std::filesystem::path path)
@@ -21,13 +29,6 @@ namespace FontIndexCore
 			return extension;
 		}
 
-		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
-		{
-			if (isCancelled && isCancelled())
-			{
-				throw std::runtime_error("Operation cancelled");
-			}
-		}
 
 		bool IsDirectoryPath(const std::filesystem::path& path)
 		{

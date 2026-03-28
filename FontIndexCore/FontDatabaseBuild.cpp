@@ -30,14 +30,6 @@ namespace FontIndexCore
 {
 	namespace
 	{
-		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
-		{
-			if (isCancelled && isCancelled())
-			{
-				throw std::runtime_error("Operation cancelled");
-			}
-		}
-
 		class FileMapping
 		{
 		private:

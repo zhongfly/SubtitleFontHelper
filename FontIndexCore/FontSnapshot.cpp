@@ -25,14 +25,6 @@ namespace FontIndexCore
 			sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint8_t);
 		constexpr uint64_t SNAPSHOT_CONTENT_HASH_SIZE = sizeof(uint64_t) + sizeof(uint64_t);
 
-		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
-		{
-			if (isCancelled && isCancelled())
-			{
-				throw std::runtime_error("Operation cancelled");
-			}
-		}
-
 		std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
 		{
 			const auto baseDirectory = persistedPath.parent_path();

@@ -58,6 +58,8 @@ namespace FontIndexCore
 
 	using FileOperationErrorCallback = std::function<void(const std::filesystem::path&, const std::string&)>;
 
+	void ThrowIfCancelled(const std::function<bool()>& isCancelled);
+
 	bool IsSupportedFontFile(const std::filesystem::path& path);
 	std::filesystem::path NormalizePath(const std::filesystem::path& path);
 	bool TryCaptureDirectorySnapshotEntry(const std::filesystem::path& path, DirectorySnapshotEntry& entry);

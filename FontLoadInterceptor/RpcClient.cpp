@@ -96,17 +96,17 @@ namespace sfh
 			return instance;
 		}
 
-		void CheckNewVerison()
+		void CheckNewVersion()
 		{
 			if (!m_versionMem)
 			{
 				return;
 			}
 
-			uint32_t newVerison = InterlockedCompareExchange(m_versionMem.get(), 0, 0);
-			if (newVerison != m_lastKnownVersion)
+			uint32_t newVersion = InterlockedCompareExchange(m_versionMem.get(), 0, 0);
+			if (newVersion != m_lastKnownVersion)
 			{
-				m_lastKnownVersion = newVerison;
+				m_lastKnownVersion = newVersion;
 				m_cache.clear();
 			}
 		}
@@ -115,7 +115,7 @@ namespace sfh
 		{
 			if (!m_good)return true;
 			std::lock_guard lg(m_lock);
-			CheckNewVerison();
+			CheckNewVersion();
 			if (m_cache.find(str) != m_cache.end())
 				return false;
 			return true;
@@ -125,7 +125,7 @@ namespace sfh
 		{
 			if (!m_good)return;
 			std::lock_guard lg(m_lock);
-			CheckNewVerison();
+			CheckNewVersion();
 			m_cache.emplace(str);
 		}
 	};

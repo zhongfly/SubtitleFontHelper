@@ -493,7 +493,8 @@ private:
 		}
 		const auto rundll32Path = GetSystemBinaryPath(L"rundll32.exe");
 		std::wostringstream oss;
-		oss << L"\"" << dllPath << L"\",InjectProcess " << processId;
+		oss << L"\"" << rundll32Path << L"\" "
+			<< L"\"" << dllPath << L"\",InjectProcess " << processId;
 
 		STARTUPINFOW startupInfo;
 		wil::unique_process_information processInfo;

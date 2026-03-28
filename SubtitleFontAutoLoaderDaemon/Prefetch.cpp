@@ -161,9 +161,8 @@ private:
 		if (!input.is_open())
 			return;
 		std::string line;
-		while (!input.eof())
+		while (std::getline(input, line))
 		{
-			std::getline(input, line);
 			if (line.empty())
 				continue;
 			auto wideLine = Utf8ToWideString(line);

@@ -94,11 +94,16 @@ void sfh::SetFileContent(const std::wstring& path, const std::string_view& data)
 	size_t written = 0;
 	while (written != data.size())
 	{
-		written += fwrite(
+		const size_t chunkWritten = fwrite(
 			data.data() + written,
 			sizeof(std::string_view::value_type),
 			std::min(data.size() - written, BLOCK_SIZE),
 			fp.get());
+		if (chunkWritten == 0)
+		{
+			throw std::runtime_error("unable to write file");
+		}
+		written += chunkWritten;
 	}
 }
 

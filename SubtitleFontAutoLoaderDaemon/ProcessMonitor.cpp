@@ -37,6 +37,23 @@ namespace
 				THROW_IF_FAILED(hr);
 		});
 	}
+
+	std::wstring GetSystemBinaryPath(const wchar_t* fileName)
+	{
+		const auto length = GetSystemDirectoryW(nullptr, 0);
+		THROW_LAST_ERROR_IF(length == 0);
+
+		std::wstring path(length, L'\0');
+		const auto written = GetSystemDirectoryW(path.data(), length);
+		THROW_LAST_ERROR_IF(written == 0);
+		path.resize(written);
+		if (!path.empty() && path.back() != L'\\')
+		{
+			path.push_back(L'\\');
+		}
+		path += fileName;
+		return path;
+	}
 }
 
 class sfh::ProcessMonitor::Implementation
@@ -474,8 +491,9 @@ private:
 		{
 			dllPath += L"\\FontLoadInterceptor64.dll";
 		}
+		const auto rundll32Path = GetSystemBinaryPath(L"rundll32.exe");
 		std::wostringstream oss;
-		oss << L"rundll32.exe \"" << dllPath << "\",InjectProcess " << processId;
+		oss << L"\"" << dllPath << L"\",InjectProcess " << processId;
 
 		STARTUPINFOW startupInfo;
 		wil::unique_process_information processInfo;
@@ -487,7 +505,7 @@ private:
 		cmdline.push_back(L'\0');
 
 		THROW_LAST_ERROR_IF(CreateProcessW(
-			nullptr,
+			rundll32Path.c_str(),
 			cmdline.data(),
 			nullptr,
 			nullptr,

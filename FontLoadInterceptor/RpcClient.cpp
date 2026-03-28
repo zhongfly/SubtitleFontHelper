@@ -398,13 +398,18 @@ namespace sfh
 
 		wil::unique_hdc_window hDC = wil::GetWindowDC(HWND_DESKTOP);
 		LOGFONTW lf{};
-		wcscpy_s(lf.lfFaceName, LF_FACESIZE, query);
+		if (query && wcsnlen(query, LF_FACESIZE) < LF_FACESIZE)
+		{
+			wcscpy_s(lf.lfFaceName, LF_FACESIZE, query);
+		}
 
 		EnumInfo enumInfo;
 		enumInfo.response = &response;
 		enumInfo.maskedFace.assign(response.fonts_size(), 0);
 
-		Detour::Original::EnumFontFamiliesExW(
+		if (lf.lfFaceName[0] != 0)
+		{
+			Detour::Original::EnumFontFamiliesExW(
 			hDC.get(), &lf, [](const LOGFONT* lpelfe, const TEXTMETRIC* lpntme, DWORD dwFontType, LPARAM lParam)-> int
 			{
 				EnumInfo& info = *reinterpret_cast<EnumInfo*>(lParam);
@@ -422,6 +427,7 @@ namespace sfh
 				}
 				return TRUE;
 			}, reinterpret_cast<LPARAM>(&enumInfo), 0);
+		}
 
 		FontLoadFeedback feedback;
 

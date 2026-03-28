@@ -402,6 +402,10 @@ private:
 		size_t exePathLength = wcslen(executablePath);
 		for (auto& name : monitorList)
 		{
+			if (name.size() > exePathLength)
+			{
+				continue;
+			}
 			const wchar_t* comparisonStart = executablePath + exePathLength - name.size();
 			if ((comparisonStart == executablePath
 					|| (comparisonStart > executablePath

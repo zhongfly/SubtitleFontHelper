@@ -943,11 +943,6 @@ namespace sfh
 			}
 
 			RunIncrementalSync(stopToken, std::move(currentSnapshot));
-			if (!m_hasLastSnapshot)
-			{
-				m_lastSnapshot = CaptureSnapshot(stopToken);
-				m_hasLastSnapshot = true;
-			}
 		}
 
 		void WorkerProcedure(const std::stop_token& stopToken)
@@ -974,6 +969,11 @@ namespace sfh
 
 			PendingSnapshotChanges pendingChanges;
 			std::optional<std::chrono::steady_clock::time_point> debounceDeadline;
+			if (!m_hasLastSnapshot)
+			{
+				pendingChanges.RequireFullRescan();
+				debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
+			}
 			while (!stopToken.stop_requested())
 			{
 				DWORD timeout = INFINITE;
@@ -997,6 +997,7 @@ namespace sfh
 				}
 				if (waitResult == WAIT_TIMEOUT)
 				{
+					bool shouldRetryInitialSync = false;
 					if (pendingChanges.HasPendingWork())
 					{
 						if (IsExternalBuildInProgress())
@@ -1018,9 +1019,18 @@ namespace sfh
 							if (!m_hasLastSnapshot || !AreSnapshotsEqual(m_lastSnapshot, result.snapshot))
 								RunIncrementalSync(stopToken, std::move(result.snapshot));
 						}
+						shouldRetryInitialSync = !m_hasLastSnapshot;
 					}
 					pendingChanges.Reset();
-					debounceDeadline.reset();
+					if (shouldRetryInitialSync)
+					{
+						pendingChanges.RequireFullRescan();
+						debounceDeadline = std::chrono::steady_clock::now() + m_debounce;
+					}
+					else
+					{
+						debounceDeadline.reset();
+					}
 					continue;
 				}
 				if (waitResult >= WAIT_OBJECT_0 + 1 && waitResult < WAIT_OBJECT_0 + waitHandles.size())

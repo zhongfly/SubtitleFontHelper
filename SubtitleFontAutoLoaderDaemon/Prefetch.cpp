@@ -4,6 +4,7 @@
 
 #include "Prefetch.h"
 #include "Common.h"
+#include "ToastNotifier.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -131,12 +132,13 @@ class sfh::Prefetch::Implementation : public sfh::IRpcFeedbackHandler
 {
 	IDaemon* m_daemon;
 	SimpleLRU<std::wstring> m_lru;
+	bool m_missingFontNotificationsEnabled = true;
 
 	std::wstring m_cachePath;
 
 public:
-	Implementation(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath)
-		: m_lru(prefetchCount), m_cachePath(lruPath)
+	Implementation(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath, bool missingFontNotificationsEnabled)
+		: m_daemon(daemon), m_lru(prefetchCount), m_missingFontNotificationsEnabled(missingFontNotificationsEnabled), m_cachePath(lruPath)
 	{
 		LoadLruCache(m_cachePath);
 	}
@@ -192,6 +194,18 @@ public:
 			auto path = Utf8ToWideString(item);
 			Load(path);
 		}
+		if (m_missingFontNotificationsEnabled && !data.missingquery().empty())
+		{
+			try
+			{
+				ToastNotifier().ShowToast(
+					L"Subtitle Font Helper",
+					L"未找到字体：" + Utf8ToWideString(data.missingquery()));
+			}
+			catch (...)
+			{
+			}
+		}
 	}
 
 	IRpcFeedbackHandler* GetRpcFeedbackHandler()
@@ -200,8 +214,16 @@ public:
 	}
 };
 
-sfh::Prefetch::Prefetch(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath)
-	: m_impl(std::make_unique<Implementation>(daemon, prefetchCount, lruPath))
+sfh::Prefetch::Prefetch(
+	IDaemon* daemon,
+	size_t prefetchCount,
+	const std::wstring& lruPath,
+	bool missingFontNotificationsEnabled)
+	: m_impl(std::make_unique<Implementation>(
+		daemon,
+		prefetchCount,
+		lruPath,
+		missingFontNotificationsEnabled))
 {
 }
 

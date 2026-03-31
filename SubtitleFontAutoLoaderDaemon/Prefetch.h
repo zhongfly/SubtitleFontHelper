@@ -12,7 +12,7 @@ namespace sfh
 		class Implementation;
 		std::unique_ptr<Implementation> m_impl;
 	public:
-		Prefetch(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath);
+		Prefetch(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath, bool missingFontNotificationsEnabled);
 		~Prefetch();
 
 		Prefetch(const Prefetch&) = delete;

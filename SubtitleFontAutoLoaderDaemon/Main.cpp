@@ -632,7 +632,11 @@ namespace sfh
 				watchOptions.m_task = std::move(managedTask);
 				managedIndexWatchOptions.push_back(std::move(watchOptions));
 			}
-			newService->m_prefetch = std::make_unique<Prefetch>(newService->m_messageSink.get(), cfg->lruSize, lruCachePath);
+			newService->m_prefetch = std::make_unique<Prefetch>(
+				newService->m_messageSink.get(),
+				cfg->lruSize,
+				lruCachePath,
+				cfg->missingFontNotifications);
 			newService->m_queryService = std::make_unique<QueryService>(newService->m_messageSink.get());
 			newService->m_queryService->Load(std::move(dbs), false);
 			for (auto& process : cfg->m_monitorProcess)

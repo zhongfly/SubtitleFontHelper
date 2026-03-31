@@ -31,4 +31,5 @@ message FontQueryResponse
 message FontLoadFeedback
 {
 	repeated string path = 1;
+	string missingQuery = 2;
 }

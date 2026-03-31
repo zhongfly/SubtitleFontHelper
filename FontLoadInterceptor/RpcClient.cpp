@@ -455,6 +455,7 @@ namespace sfh
 		{
 			const FontQueryResponse* response;
 			std::vector<char> maskedFace;
+			bool hasSystemMatch = false;
 		};
 
 		wil::unique_hdc_window hDC = wil::GetWindowDC(HWND_DESKTOP);
@@ -474,6 +475,7 @@ namespace sfh
 			hDC.get(), &lf, [](const LOGFONT* lpelfe, const TEXTMETRIC* lpntme, DWORD dwFontType, LPARAM lParam)-> int
 			{
 				EnumInfo& info = *reinterpret_cast<EnumInfo*>(lParam);
+				info.hasSystemMatch = true;
 				auto faceName = WideToUtf8String(lpelfe->lfFaceName);
 				for (int i = 0; i < info.response->fonts_size(); ++i)
 				{
@@ -491,19 +493,30 @@ namespace sfh
 		}
 
 		FontLoadFeedback feedback;
+		bool hasFeedback = false;
 
 		for (int i = 0; i < response.fonts_size(); ++i)
 		{
 			if (enumInfo.maskedFace[i])continue;
 			auto path = Utf8ToWideString(response.fonts()[i].path());
 			feedback.add_path(response.fonts()[i].path());
+			hasFeedback = true;
 
 			AddFontResourceExW(path.c_str(), FR_PRIVATE, nullptr);
 
 			EventLog::GetInstance().LogDllLoadFont(GetCurrentProcessId(), GetCurrentThreadId(), path.c_str());
 		}
 
-		SendFeedbackAsync(std::move(feedback));
+		if (response.fonts_size() == 0 && !enumInfo.hasSystemMatch && query != nullptr && *query != L'\0')
+		{
+			feedback.set_missingquery(WideToUtf8String(query));
+			hasFeedback = true;
+		}
+
+		if (hasFeedback)
+		{
+			SendFeedbackAsync(std::move(feedback));
+		}
 	}
 
 	void QueryAndLoad(const wchar_t* query)

@@ -720,6 +720,10 @@ namespace
 			{
 				m_config->managedIndexProgressNotifications = ExpectBool(value, key.c_str());
 			}
+			else if (key == "missing_font_notifications" || key == "missingFontNotifications")
+			{
+				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
+			}
 			else if (key == "monitor_processes" || key == "monitorProcesses")
 			{
 				for (const auto& process : ExpectStringArray(value, key.c_str()))
@@ -947,6 +951,7 @@ namespace
 					DEFINE_XML_ATTRIBUTE(wmiPollInterval);
 					DEFINE_XML_ATTRIBUTE(lruSize);
 					DEFINE_XML_ATTRIBUTE(managedIndexProgressNotifications);
+					DEFINE_XML_ATTRIBUTE(missingFontNotifications);
 
 #undef DEFINE_XML_ATTRIBUTE
 					if (SUCCEEDED(
@@ -993,6 +998,30 @@ namespace
 								return E_FAIL;
 							}
 							m_config->managedIndexProgressNotifications = boolValue;
+						}
+						catch (...)
+						{
+							// don't let exceptions travel across dll
+							return E_FAIL;
+						}
+					}
+					if (SUCCEEDED(
+						pAttributes->getValueFromName(
+							L"",
+							0,
+							missingFontNotifications,
+							missingFontNotificationsCch,
+							&attrValue,
+							&attrLength)))
+					{
+						try
+						{
+							bool boolValue = false;
+							if (!TryParseXmlBoolean(attrValue, attrLength, boolValue))
+							{
+								return E_FAIL;
+							}
+							m_config->missingFontNotifications = boolValue;
 						}
 						catch (...)
 						{
@@ -1480,6 +1509,13 @@ namespace sfh
 		THROW_IF_FAILED(
 			rootElement->setAttribute(
 				wil::make_bstr(L"managedIndexProgressNotifications").get(),
+				value));
+		InitVariantFromString(
+			config.missingFontNotifications ? L"true" : L"false",
+			value.addressof());
+		THROW_IF_FAILED(
+			rootElement->setAttribute(
+				wil::make_bstr(L"missingFontNotifications").get(),
 				value));
 		for (auto& indexFile : config.m_indexFile)
 		{

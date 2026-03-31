@@ -19,6 +19,21 @@ namespace sfh
 {
 	namespace
 	{
+		std::wstring NormalizePathForComparison(const std::filesystem::path& path)
+		{
+			std::error_code ec;
+			auto normalized = std::filesystem::absolute(path, ec);
+			if (ec)
+			{
+				normalized = path;
+			}
+			normalized = normalized.lexically_normal();
+
+			auto text = normalized.wstring();
+			std::transform(text.begin(), text.end(), text.begin(), towlower);
+			return text;
+		}
+
 		std::wstring EscapeXml(const std::wstring& value)
 		{
 			std::wstring result;
@@ -57,29 +72,36 @@ namespace sfh
 			return std::filesystem::path(programsPath.get()) / L"SubtitleFontHelper.lnk";
 		}
 
-		void EnsureShortcutInstalled()
+		bool IsExpectedShortcut(IShellLinkW* shellLink, IPropertyStore* propertyStore, const std::filesystem::path& modulePath)
 		{
-			const auto shortcutPath = GetShortcutPath();
-			std::error_code ec;
-			if (std::filesystem::exists(shortcutPath, ec) && !ec)
+			wchar_t linkPath[MAX_PATH]{};
+			if (FAILED(shellLink->GetPath(linkPath, std::size(linkPath), nullptr, SLGP_RAWPATH))
+				|| linkPath[0] == L'\0')
 			{
-				return;
+				return false;
 			}
-			const auto modulePath = std::filesystem::path(wil::GetModuleFileNameW<wil::unique_hlocal_string>().get());
 
-			wil::com_ptr<IShellLinkW> shellLink;
-			THROW_IF_FAILED(CoCreateInstance(
-				CLSID_ShellLink,
-				nullptr,
-				CLSCTX_INPROC_SERVER,
-				IID_PPV_ARGS(shellLink.put())));
-			THROW_IF_FAILED(shellLink->SetPath(modulePath.c_str()));
-			THROW_IF_FAILED(shellLink->SetArguments(L""));
-			THROW_IF_FAILED(shellLink->SetIconLocation(modulePath.c_str(), 0));
+			PROPVARIANT appIdProp{};
+			if (FAILED(propertyStore->GetValue(PKEY_AppUserModel_ID, &appIdProp)))
+			{
+				return false;
+			}
+			auto clearAppId = wil::scope_exit([&]()
+			{
+				PropVariantClear(&appIdProp);
+			});
 
-			wil::com_ptr<IPropertyStore> propertyStore;
-			THROW_IF_FAILED(shellLink->QueryInterface(IID_PPV_ARGS(propertyStore.put())));
+			if (appIdProp.vt != VT_LPWSTR || appIdProp.pwszVal == nullptr)
+			{
+				return false;
+			}
 
+			return NormalizePathForComparison(linkPath) == NormalizePathForComparison(modulePath)
+				&& _wcsicmp(appIdProp.pwszVal, ToastNotifier::AUMID) == 0;
+		}
+
+		void ConfigureShortcut(IShellLinkW* shellLink, IPropertyStore* propertyStore, const std::filesystem::path& modulePath)
+		{
 			PROPVARIANT appIdProp{};
 			THROW_IF_FAILED(InitPropVariantFromString(ToastNotifier::AUMID, &appIdProp));
 			auto clearAppId = wil::scope_exit([&]()
@@ -87,12 +109,84 @@ namespace sfh
 				PropVariantClear(&appIdProp);
 			});
 
+			THROW_IF_FAILED(shellLink->SetPath(modulePath.c_str()));
+			THROW_IF_FAILED(shellLink->SetArguments(L""));
+			THROW_IF_FAILED(shellLink->SetIconLocation(modulePath.c_str(), 0));
 			THROW_IF_FAILED(propertyStore->SetValue(PKEY_AppUserModel_ID, appIdProp));
 			THROW_IF_FAILED(propertyStore->Commit());
+		}
+
+		void InstallShortcut(const std::filesystem::path& shortcutPath, const std::filesystem::path& modulePath)
+		{
+			wil::com_ptr<IShellLinkW> shellLink;
+			THROW_IF_FAILED(CoCreateInstance(
+				CLSID_ShellLink,
+				nullptr,
+				CLSCTX_INPROC_SERVER,
+				IID_PPV_ARGS(shellLink.put())));
+
+			wil::com_ptr<IPropertyStore> propertyStore;
+			THROW_IF_FAILED(shellLink->QueryInterface(IID_PPV_ARGS(propertyStore.put())));
+			ConfigureShortcut(shellLink.get(), propertyStore.get(), modulePath);
 
 			wil::com_ptr<IPersistFile> persistFile;
 			THROW_IF_FAILED(shellLink->QueryInterface(IID_PPV_ARGS(persistFile.put())));
 			THROW_IF_FAILED(persistFile->Save(shortcutPath.c_str(), TRUE));
+		}
+
+		bool TryUpdateShortcut(const std::filesystem::path& shortcutPath, const std::filesystem::path& modulePath)
+		{
+			wil::com_ptr<IShellLinkW> shellLink;
+			THROW_IF_FAILED(CoCreateInstance(
+				CLSID_ShellLink,
+				nullptr,
+				CLSCTX_INPROC_SERVER,
+				IID_PPV_ARGS(shellLink.put())));
+
+			wil::com_ptr<IPersistFile> persistFile;
+			THROW_IF_FAILED(shellLink->QueryInterface(IID_PPV_ARGS(persistFile.put())));
+			if (FAILED(persistFile->Load(shortcutPath.c_str(), STGM_READWRITE)))
+			{
+				return false;
+			}
+
+			wil::com_ptr<IPropertyStore> propertyStore;
+			THROW_IF_FAILED(shellLink->QueryInterface(IID_PPV_ARGS(propertyStore.put())));
+			if (IsExpectedShortcut(shellLink.get(), propertyStore.get(), modulePath))
+			{
+				return true;
+			}
+
+			ConfigureShortcut(shellLink.get(), propertyStore.get(), modulePath);
+			THROW_IF_FAILED(persistFile->Save(nullptr, TRUE));
+			return true;
+		}
+
+		void EnsureShortcutInstalled()
+		{
+			const auto shortcutPath = GetShortcutPath();
+			const auto modulePath = std::filesystem::path(wil::GetModuleFileNameW<wil::unique_hlocal_string>().get());
+
+			std::error_code ec;
+			if (std::filesystem::exists(shortcutPath, ec) && !ec)
+			{
+				if (TryUpdateShortcut(shortcutPath, modulePath))
+				{
+					return;
+				}
+
+				ec.clear();
+				std::filesystem::remove(shortcutPath, ec);
+				if (ec)
+				{
+					throw std::filesystem::filesystem_error(
+						"failed to replace invalid toast shortcut",
+						shortcutPath,
+						ec);
+				}
+			}
+
+			InstallShortcut(shortcutPath, modulePath);
 		}
 
 		void ShowToastOnStaThread(const std::wstring& title, const std::wstring& message)

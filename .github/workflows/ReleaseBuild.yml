@@ -49,15 +49,16 @@ jobs:
       with:
         path: |
           vcpkg_binary_cache\
-          vcpkg_installed\
+          vcpkg_installed\${{ matrix.triplet }}\
         key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
 
     - name: Prepare vcpkg directories
       shell: pwsh
       run: |
         $env:VCPKG_DEFAULT_BINARY_CACHE="$env:GITHUB_WORKSPACE\vcpkg_binary_cache"
+        $tripletInstallRoot="$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
         New-Item -Type Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE"
-        New-Item -Type Directory -Force "$env:GITHUB_WORKSPACE\vcpkg_installed"
+        New-Item -Type Directory -Force $tripletInstallRoot
         echo "VCPKG_DEFAULT_BINARY_CACHE=$env:VCPKG_DEFAULT_BINARY_CACHE" >> $env:GITHUB_ENV
         echo "VCPKG_INSTALLATION_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
 
@@ -71,7 +72,8 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       shell: pwsh
       run: |
-        & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet ${{ matrix.triplet }}
+        $tripletInstallRoot="$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
+        & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet ${{ matrix.triplet }} --x-install-root="$tripletInstallRoot"
 
     - name: Build ${{ matrix.platform }}
       working-directory: ${{env.GITHUB_WORKSPACE}}

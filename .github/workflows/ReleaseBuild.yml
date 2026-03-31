@@ -50,7 +50,7 @@ jobs:
         path: |
           vcpkg_binary_cache\
           vcpkg_installed\${{ matrix.triplet }}\
-        key: ${{ runner.os }}-${{ env.BUILD_CONFIGURATION }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
+        key: ${{ runner.os }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
 
     - name: Prepare vcpkg directories
       shell: pwsh

@@ -113,12 +113,8 @@ namespace sfh
 			auto notifier = winrt::Windows::UI::Notifications::ToastNotificationManager::CreateToastNotifier(ToastNotifier::AUMID);
 			notifier.Show(notification);
 		}
-	}
 
-	void ToastNotifier::ShowToast(const std::wstring& title, const std::wstring& message) const
-	{
-		std::exception_ptr backgroundError;
-		std::thread worker([&]()
+		void ShowToastWorker(std::wstring title, std::wstring message, std::exception_ptr* backgroundError)
 		{
 			try
 			{
@@ -126,14 +122,35 @@ namespace sfh
 			}
 			catch (...)
 			{
-				backgroundError = std::current_exception();
+				if (backgroundError != nullptr)
+				{
+					*backgroundError = std::current_exception();
+				}
 			}
+		}
+	}
+
+	void ToastNotifier::ShowToast(const std::wstring& title, const std::wstring& message) const
+	{
+		std::exception_ptr backgroundError;
+		std::thread worker([title, message, &backgroundError]()
+		{
+			ShowToastWorker(title, message, &backgroundError);
 		});
 		worker.join();
 		if (backgroundError)
 		{
 			std::rethrow_exception(backgroundError);
 		}
+	}
+
+	void ToastNotifier::ShowToastAsync(std::wstring title, std::wstring message) const
+	{
+		std::thread(
+			[title = std::move(title), message = std::move(message)]() mutable
+			{
+				ShowToastWorker(std::move(title), std::move(message), nullptr);
+			}).detach();
 	}
 
 	void ToastNotifier::ShowTestToast() const

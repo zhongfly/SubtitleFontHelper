@@ -198,7 +198,7 @@ public:
 		{
 			try
 			{
-				ToastNotifier().ShowToast(
+				ToastNotifier().ShowToastAsync(
 					L"Subtitle Font Helper",
 					L"未找到字体：" + Utf8ToWideString(data.missingquery()));
 			}

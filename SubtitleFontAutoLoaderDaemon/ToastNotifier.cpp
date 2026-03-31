@@ -60,6 +60,11 @@ namespace sfh
 		void EnsureShortcutInstalled()
 		{
 			const auto shortcutPath = GetShortcutPath();
+			std::error_code ec;
+			if (std::filesystem::exists(shortcutPath, ec) && !ec)
+			{
+				return;
+			}
 			const auto modulePath = std::filesystem::path(wil::GetModuleFileNameW<wil::unique_hlocal_string>().get());
 
 			wil::com_ptr<IShellLinkW> shellLink;

@@ -315,10 +315,10 @@ private:
 
 		THROW_IF_FAILED(CoSetProxyBlanket(
 			wbemService.query<IUnknown>().get(),
-			RPC_C_AUTHN_DEFAULT,
-			RPC_C_AUTHZ_DEFAULT,
+			RPC_C_AUTHN_WINNT,
+			RPC_C_AUTHZ_NONE,
 			nullptr,
-			RPC_C_AUTHN_LEVEL_DEFAULT,
+			RPC_C_AUTHN_LEVEL_CALL,
 			RPC_C_IMP_LEVEL_IMPERSONATE,
 			nullptr,
 			EOAC_NONE

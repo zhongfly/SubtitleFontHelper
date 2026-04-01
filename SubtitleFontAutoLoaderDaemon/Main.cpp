@@ -581,6 +581,7 @@ namespace sfh
 					managedTask.m_progressState = std::make_shared<ManagedIndexBuildProgressState>();
 					newService->m_managedIndexProgressStates.push_back(managedTask.m_progressState);
 					managedTask.m_enableNotifications = cfg->managedIndexNotifications;
+					managedTask.m_enableFailureNotifications = cfg->managedIndexFailureNotifications;
 					watchOptions.m_workerCount = managedBuildWorkerCount;
 
 					std::error_code ec;

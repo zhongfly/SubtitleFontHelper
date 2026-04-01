@@ -691,6 +691,10 @@ namespace
 			{
 				m_config->managedIndexNotifications = ExpectBool(value, key.c_str());
 			}
+			else if (key == "managed_index_failure_notifications")
+			{
+				m_config->managedIndexFailureNotifications = ExpectBool(value, key.c_str());
+			}
 			else if (key == "missing_font_notifications")
 			{
 				m_config->missingFontNotifications = ExpectBool(value, key.c_str());

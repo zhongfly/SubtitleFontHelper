@@ -21,6 +21,7 @@ namespace sfh
 			std::vector<std::filesystem::path> m_sourceFolders;
 			std::shared_ptr<ManagedIndexBuildProgressState> m_progressState;
 			bool m_enableNotifications = false;
+			bool m_enableFailureNotifications = false;
 		};
 
 		ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount);

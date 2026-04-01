@@ -945,7 +945,7 @@ namespace sfh
 			}
 			catch (const std::exception& e)
 			{
-				if (!stopToken.stop_requested() && m_task.m_enableNotifications)
+				if (!stopToken.stop_requested() && m_task.m_enableFailureNotifications)
 				{
 					TryShowToast(
 						L"Subtitle Font Helper",

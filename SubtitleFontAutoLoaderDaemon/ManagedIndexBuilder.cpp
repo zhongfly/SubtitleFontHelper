@@ -270,7 +270,7 @@ namespace sfh
 			catch (const std::exception& e)
 			{
 				TryLogManagedIndexBuildFailure(task, e);
-				if (!stopToken.stop_requested() && task.m_enableNotifications)
+				if (!stopToken.stop_requested() && task.m_enableFailureNotifications)
 				{
 					TryShowToast(
 						L"Subtitle Font Helper",

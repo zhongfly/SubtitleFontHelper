@@ -49,35 +49,6 @@ namespace
 			&& wcsncmp(actual, expected, actualLength) == 0;
 	}
 
-	bool TryParseXmlBoolean(const wchar_t* value, int valueLength, bool& result)
-	{
-		if (valueLength == 1)
-		{
-			if (value[0] == L'1')
-			{
-				result = true;
-				return true;
-			}
-			if (value[0] == L'0')
-			{
-				result = false;
-				return true;
-			}
-		}
-
-		if (valueLength == 4 && _wcsnicmp(value, L"true", 4) == 0)
-		{
-			result = true;
-			return true;
-		}
-		if (valueLength == 5 && _wcsnicmp(value, L"false", 5) == 0)
-		{
-			result = false;
-			return true;
-		}
-		return false;
-	}
-
 	std::string ReadUtf8TextFile(const std::wstring& path)
 	{
 		std::string ret;
@@ -708,30 +679,30 @@ namespace
 
 		void ApplyRootKey(const std::string& key, const TomlValue& value)
 		{
-			if (key == "wmi_poll_interval" || key == "wmiPollInterval")
+			if (key == "wmi_poll_interval")
 			{
 				m_config->wmiPollInterval = ExpectUInt32(value, key.c_str());
 			}
-			else if (key == "lru_size" || key == "lruSize")
+			else if (key == "lru_size")
 			{
 				m_config->lruSize = ExpectUInt32(value, key.c_str());
 			}
-			else if (key == "managed_index_notifications" || key == "managedIndexNotifications")
+			else if (key == "managed_index_notifications")
 			{
 				m_config->managedIndexNotifications = ExpectBool(value, key.c_str());
 			}
-			else if (key == "missing_font_notifications" || key == "missingFontNotifications")
+			else if (key == "missing_font_notifications")
 			{
 				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
 			}
-			else if (key == "monitor_processes" || key == "monitorProcesses")
+			else if (key == "monitor_processes")
 			{
 				for (const auto& process : ExpectStringArray(value, key.c_str()))
 				{
 					m_config->m_monitorProcess.push_back({ process });
 				}
 			}
-			else if (key == "index_files" || key == "indexFiles")
+			else if (key == "index_files")
 			{
 				for (const auto& path : ExpectStringArray(value, key.c_str()))
 				{
@@ -749,7 +720,7 @@ namespace
 			{
 				m_config->m_indexFile.back().m_path = ExpectString(value, key.c_str());
 			}
-			else if (key == "source_folders" || key == "sourceFolders")
+			else if (key == "source_folders")
 			{
 				m_config->m_indexFile.back().m_sourceFolders = ExpectStringArray(value, key.c_str());
 			}
@@ -889,277 +860,6 @@ namespace
 			return S_OK;
 		}
 	};
-
-	class ConfigSAXContentHandler : public SimpleSAXContentHandler
-	{
-	private:
-		enum class ElementType:size_t
-		{
-			Document = 0,
-			RootElement,
-			IndexFileElement,
-			MonitorElement
-		};
-
-		std::unique_ptr<sfh::ConfigFile> m_config;
-		std::vector<ElementType> m_status;
-		size_t m_ignoreDepth = 0;
-
-	public:
-		HRESULT STDMETHODCALLTYPE startDocument() override
-		{
-			m_config = std::make_unique<sfh::ConfigFile>();
-			m_status.clear();
-			m_status.emplace_back(ElementType::Document);
-			m_ignoreDepth = 0;
-			return S_OK;
-		}
-
-		HRESULT STDMETHODCALLTYPE endDocument() override
-		{
-			if (!m_status.empty() && m_status.back() == ElementType::Document)
-				m_status.pop_back();
-			if (m_status.empty())
-				return S_OK;
-			return E_FAIL;
-		}
-
-		HRESULT STDMETHODCALLTYPE startElement(const wchar_t* pwchNamespaceUri, int cchNamespaceUri,
-		                                       const wchar_t* pwchLocalName,
-		                                       int cchLocalName, const wchar_t* pwchQName, int cchQName,
-		                                       ISAXAttributes* pAttributes) override
-		{
-			if (m_ignoreDepth != 0)
-			{
-				++m_ignoreDepth;
-				return S_OK;
-			}
-			if (m_status.empty())
-				return E_FAIL;
-			switch (m_status.back())
-			{
-			case ElementType::Document:
-				if (XmlNameEquals(pwchLocalName, cchLocalName, L"ConfigFile"))
-				{
-					m_status.emplace_back(ElementType::RootElement);
-					const wchar_t* attrValue;
-					int attrLength;
-
-#define DEFINE_XML_ATTRIBUTE(name) static constexpr wchar_t name[] = L#name; \
-	static constexpr size_t name##Cch = std::extent_v<decltype(name)>-1
-
-					DEFINE_XML_ATTRIBUTE(wmiPollInterval);
-					DEFINE_XML_ATTRIBUTE(lruSize);
-					DEFINE_XML_ATTRIBUTE(managedIndexNotifications);
-					DEFINE_XML_ATTRIBUTE(missingFontNotifications);
-
-#undef DEFINE_XML_ATTRIBUTE
-					if (SUCCEEDED(
-						pAttributes->getValueFromName(L"", 0, wmiPollInterval, wmiPollIntervalCch, &attrValue, &
-							attrLength)))
-					{
-						try
-						{
-							m_config->wmiPollInterval = wcstou32(attrValue, attrLength);
-						}
-						catch (...)
-						{
-							// don't let exceptions travel across dll
-							return E_FAIL;
-						}
-					}
-					if (SUCCEEDED(
-						pAttributes->getValueFromName(L"", 0, lruSize, lruSizeCch, &attrValue, &attrLength)))
-					{
-						try
-						{
-							m_config->lruSize = wcstou32(attrValue, attrLength);
-						}
-						catch (...)
-						{
-							// don't let exceptions travel across dll
-							return E_FAIL;
-						}
-					}
-					if (SUCCEEDED(
-						pAttributes->getValueFromName(
-							L"",
-							0,
-							managedIndexNotifications,
-							managedIndexNotificationsCch,
-							&attrValue,
-							&attrLength)))
-					{
-						try
-						{
-							bool boolValue = false;
-							if (!TryParseXmlBoolean(attrValue, attrLength, boolValue))
-							{
-								return E_FAIL;
-							}
-							m_config->managedIndexNotifications = boolValue;
-						}
-						catch (...)
-						{
-							// don't let exceptions travel across dll
-							return E_FAIL;
-						}
-					}
-					if (SUCCEEDED(
-						pAttributes->getValueFromName(
-							L"",
-							0,
-							missingFontNotifications,
-							missingFontNotificationsCch,
-							&attrValue,
-							&attrLength)))
-					{
-						try
-						{
-							bool boolValue = false;
-							if (!TryParseXmlBoolean(attrValue, attrLength, boolValue))
-							{
-								return E_FAIL;
-							}
-							m_config->missingFontNotifications = boolValue;
-						}
-						catch (...)
-						{
-							// don't let exceptions travel across dll
-							return E_FAIL;
-						}
-					}
-				}
-				else
-				{
-					return E_FAIL;
-				}
-				break;
-			case ElementType::RootElement:
-				if (XmlNameEquals(pwchLocalName, cchLocalName, L"IndexFile"))
-				{
-					m_config->m_indexFile.emplace_back();
-					m_status.emplace_back(ElementType::IndexFileElement);
-				}
-				else if (XmlNameEquals(pwchLocalName, cchLocalName, L"MonitorProcess"))
-				{
-					m_config->m_monitorProcess.emplace_back();
-					m_status.emplace_back(ElementType::MonitorElement);
-				}
-				else
-				{
-					m_ignoreDepth = 1;
-				}
-				break;
-			case ElementType::IndexFileElement:
-				m_ignoreDepth = 1;
-				break;
-			case ElementType::MonitorElement:
-				m_ignoreDepth = 1;
-				break;
-			default:
-				return E_FAIL;
-			}
-			return S_OK;
-		}
-
-		HRESULT STDMETHODCALLTYPE endElement(const wchar_t* pwchNamespaceUri, int cchNamespaceUri,
-		                                     const wchar_t* pwchLocalName,
-		                                     int cchLocalName, const wchar_t* pwchQName, int cchQName) override
-		{
-			if (m_ignoreDepth != 0)
-			{
-				--m_ignoreDepth;
-				return S_OK;
-			}
-			if (m_status.empty())
-				return E_FAIL;
-			switch (m_status.back())
-			{
-			case ElementType::RootElement:
-				if (XmlNameEquals(pwchLocalName, cchLocalName, L"ConfigFile"))
-				{
-					m_status.pop_back();
-				}
-				else
-				{
-					return E_FAIL;
-				}
-				break;
-			case ElementType::IndexFileElement:
-				if (XmlNameEquals(pwchLocalName, cchLocalName, L"IndexFile"))
-				{
-					m_status.pop_back();
-				}
-				else
-				{
-					return E_FAIL;
-				}
-				break;
-			case ElementType::MonitorElement:
-				if (XmlNameEquals(pwchLocalName, cchLocalName, L"MonitorProcess"))
-				{
-					m_status.pop_back();
-				}
-				else
-				{
-					return E_FAIL;
-				}
-				break;
-			default:
-				return E_FAIL;
-			}
-			return S_OK;
-		}
-
-		HRESULT STDMETHODCALLTYPE characters(const wchar_t* pwchChars, int cchChars) override
-		{
-			if (m_ignoreDepth != 0)
-				return S_OK;
-			if (m_status.empty())
-				return E_FAIL;
-			switch (m_status.back())
-			{
-			case ElementType::IndexFileElement:
-				m_config->m_indexFile.back().m_path.append(pwchChars, cchChars);
-				break;
-			case ElementType::MonitorElement:
-				m_config->m_monitorProcess.back().m_name.append(pwchChars, cchChars);
-				break;
-			}
-			// ignore unexpected characters
-			return S_OK;
-		}
-
-		std::unique_ptr<sfh::ConfigFile> GetConfigFile()
-		{
-			return std::move(m_config);
-		}
-	};
-
-	std::unique_ptr<sfh::ConfigFile> ReadXmlConfigFromFile(const std::wstring& path)
-	{
-		auto com = wil::CoInitializeEx();
-
-		wil::unique_variant pathVariant;
-		wil::com_ptr<IStream> stream;
-		THROW_IF_FAILED_MSG(
-			SHCreateStreamOnFileEx(
-				path.c_str(),
-				STGM_FAILIFTHERE | STGM_READ | STGM_SHARE_EXCLUSIVE,
-				FILE_ATTRIBUTE_NORMAL,
-				FALSE,
-				nullptr,
-				stream.put()), "CANNOT OPEN CONFIG FILE: %ws", path.c_str());
-		InitVariantFromUnknown(stream.query<IUnknown>().get(), pathVariant.addressof());
-
-		auto saxReader = wil::CoCreateInstance<ISAXXMLReader>(CLSID_SAXXMLReader30);
-		wil::com_ptr<ConfigSAXContentHandler> handler(new ConfigSAXContentHandler);
-		THROW_IF_FAILED(saxReader->putContentHandler(handler.get()));
-		THROW_IF_FAILED_MSG(saxReader->parse(pathVariant), "BAD CONFIG: %ws", path.c_str());
-
-		return handler->GetConfigFile();
-	}
 
 	class FontDatabaseSAXContentHandler : public SimpleSAXContentHandler
 	{
@@ -1433,13 +1133,19 @@ void sfh::FontDatabase::DeduplicatePaths()
 std::unique_ptr<sfh::ConfigFile> sfh::ConfigFile::ReadFromFile(const std::wstring& path)
 {
 	auto extension = std::filesystem::path(path).extension().wstring();
-	if (_wcsicmp(extension.c_str(), L".toml") == 0)
+	if (_wcsicmp(extension.c_str(), L".toml") != 0)
+		throw std::runtime_error("configuration file must be SubtitleFontHelper.toml");
+
+	std::error_code ec;
+	if (!std::filesystem::exists(path, ec) || ec)
 	{
-		auto config = ReadTomlConfigFromFile(path);
-		ResolveTomlConfigPaths(*config, path);
-		return config;
+		throw std::runtime_error(
+			"SubtitleFontHelper.toml not found. XML configuration is no longer supported; please migrate to TOML.");
 	}
-	return ReadXmlConfigFromFile(path);
+
+	auto config = ReadTomlConfigFromFile(path);
+	ResolveTomlConfigPaths(*config, path);
+	return config;
 }
 
 std::unique_ptr<sfh::FontDatabase> sfh::FontDatabase::ReadFromFile(const std::wstring& path)
@@ -1490,54 +1196,6 @@ namespace sfh
 		THROW_IF_FAILED(saxReader->putProperty(L"http://xml.org/sax/properties/declaration-handler", unk));
 		InitVariantFromUnknown(document.query<IUnknown>().get(), unk.reset_and_addressof());
 		THROW_IF_FAILED(saxReader->parse(unk));
-	}
-
-	wil::com_ptr<IXMLDOMDocument> ConfigFileToDocument(const ConfigFile& config)
-	{
-		auto document = wil::CoCreateInstance<IXMLDOMDocument>(CLSID_DOMDocument30);
-
-		wil::com_ptr<IXMLDOMElement> rootElement;
-		THROW_IF_FAILED(document->createElement(wil::make_bstr(L"ConfigFile").get(), rootElement.put()));
-		wil::unique_variant value;
-		InitVariantFromString(std::to_wstring(config.wmiPollInterval).c_str(), value.addressof());
-		THROW_IF_FAILED(rootElement->setAttribute(wil::make_bstr(L"wmiPollInterval").get(), value));
-		InitVariantFromString(std::to_wstring(config.lruSize).c_str(), value.addressof());
-		THROW_IF_FAILED(rootElement->setAttribute(wil::make_bstr(L"lruSize").get(), value));
-		InitVariantFromString(
-			config.managedIndexNotifications ? L"true" : L"false",
-			value.addressof());
-		THROW_IF_FAILED(
-			rootElement->setAttribute(
-				wil::make_bstr(L"managedIndexNotifications").get(),
-				value));
-		InitVariantFromString(
-			config.missingFontNotifications ? L"true" : L"false",
-			value.addressof());
-		THROW_IF_FAILED(
-			rootElement->setAttribute(
-				wil::make_bstr(L"missingFontNotifications").get(),
-				value));
-		for (auto& indexFile : config.m_indexFile)
-		{
-			wil::com_ptr<IXMLDOMElement> indexFileElement;
-			THROW_IF_FAILED(document->createElement(wil::make_bstr(L"IndexFile").get(), indexFileElement.put()));
-
-			THROW_IF_FAILED(indexFileElement->put_text(wil::make_bstr(indexFile.m_path.c_str()).get()));
-			THROW_IF_FAILED(rootElement->appendChild(indexFileElement.get(), nullptr));
-		}
-		for (auto& monitorProcess : config.m_monitorProcess)
-		{
-			wil::com_ptr<IXMLDOMElement> monitorProcessElement;
-			THROW_IF_FAILED(
-				document->createElement(wil::make_bstr(L"MonitorProcess").get(), monitorProcessElement.put()));
-
-			THROW_IF_FAILED(monitorProcessElement->put_text(wil::make_bstr(monitorProcess.m_name.c_str()).get()));
-			THROW_IF_FAILED(rootElement->appendChild(monitorProcessElement.get(), nullptr));
-		}
-
-		THROW_IF_FAILED(document->putref_documentElement(rootElement.get()));
-
-		return document;
 	}
 
 	wil::com_ptr<IXMLDOMDocument> FontDatabaseToDocument(const FontDatabase& db, const std::filesystem::path& path)

@@ -97,11 +97,7 @@ namespace sfh
 
 		std::filesystem::path ResolveConfigPath(const std::filesystem::path& directory)
 		{
-			std::error_code ec;
-			auto tomlPath = directory / L"SubtitleFontHelper.toml";
-			if (std::filesystem::exists(tomlPath, ec) && !ec)
-				return tomlPath;
-			return directory / L"SubtitleFontHelper.xml";
+			return directory / L"SubtitleFontHelper.toml";
 		}
 
 		void AppendConfigWatchFiles(
@@ -109,7 +105,6 @@ namespace sfh
 			const std::filesystem::path& directory)
 		{
 			watchFiles.emplace_back(directory / L"SubtitleFontHelper.toml");
-			watchFiles.emplace_back(directory / L"SubtitleFontHelper.xml");
 		}
 
 	}

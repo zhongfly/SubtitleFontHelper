@@ -54,44 +54,10 @@ namespace sfh
 			return MakePathKey(lhs) == MakePathKey(rhs);
 		}
 
-		constexpr size_t TOAST_FILE_NAME_LIMIT = 3;
-
-		std::wstring BuildChangedFileList(const wchar_t* label, const std::unordered_set<std::wstring>& paths)
-		{
-			if (paths.empty())
-			{
-				return {};
-			}
-
-			std::vector<std::wstring> names;
-			names.reserve(paths.size());
-			for (const auto& path : paths)
-			{
-				names.push_back(GetDisplayName(std::filesystem::path(path)));
-			}
-			std::sort(names.begin(), names.end());
-
-			const size_t visibleCount = names.size() < TOAST_FILE_NAME_LIMIT
-				? names.size()
-				: TOAST_FILE_NAME_LIMIT;
-			std::wstring line = std::wstring(label) + L"：";
-			for (size_t i = 0; i < visibleCount; ++i)
-			{
-				if (i != 0)
-				{
-					line += L"、";
-				}
-				line += names[i];
-			}
-			if (names.size() > visibleCount)
-			{
-				line += L" 等 " + std::to_wstring(names.size()) + L" 个";
-			}
-			return line;
-		}
-
 		std::wstring BuildSyncToastMessage(
 			const std::wstring& indexName,
+			const FontDatabase& updatedDatabase,
+			const FontDatabase& previousDatabase,
 			const std::unordered_set<std::wstring>& addedPaths,
 			const std::unordered_set<std::wstring>& removedPaths,
 			const std::unordered_set<std::wstring>& modifiedPaths)
@@ -102,22 +68,28 @@ namespace sfh
 				+ L"，修改 " + std::to_wstring(modifiedPaths.size())
 				+ L"）";
 
-			const auto addedLine = BuildChangedFileList(L"新增", addedPaths);
-			if (!addedLine.empty())
+			const auto addedSummary = BuildManagedIndexFontLogSummary(
+				updatedDatabase,
+				BuildManagedIndexPathKeys(addedPaths));
+			if (addedSummary.m_fontCount != 0)
 			{
-				message += L"\n" + addedLine;
+				message += L"\n" + BuildManagedIndexFontSummaryLine(L"新增", addedSummary);
 			}
 
-			const auto removedLine = BuildChangedFileList(L"删除", removedPaths);
-			if (!removedLine.empty())
+			const auto removedSummary = BuildManagedIndexFontLogSummary(
+				previousDatabase,
+				BuildManagedIndexPathKeys(removedPaths));
+			if (removedSummary.m_fontCount != 0)
 			{
-				message += L"\n" + removedLine;
+				message += L"\n" + BuildManagedIndexFontSummaryLine(L"删除", removedSummary);
 			}
 
-			const auto modifiedLine = BuildChangedFileList(L"修改", modifiedPaths);
-			if (!modifiedLine.empty())
+			const auto modifiedSummary = BuildManagedIndexFontLogSummary(
+				updatedDatabase,
+				BuildManagedIndexPathKeys(modifiedPaths));
+			if (modifiedSummary.m_fontCount != 0)
 			{
-				message += L"\n" + modifiedLine;
+				message += L"\n" + BuildManagedIndexFontSummaryLine(L"修改", modifiedSummary);
 			}
 
 			return message;
@@ -961,7 +933,13 @@ namespace sfh
 				{
 					TryShowToast(
 						L"Subtitle Font Helper",
-						BuildSyncToastMessage(indexName, addedPaths, removedPaths, modifiedPaths));
+						BuildSyncToastMessage(
+							indexName,
+							m_database,
+							previousDatabase,
+							addedPaths,
+							removedPaths,
+							modifiedPaths));
 				}
 				m_daemon->NotifyManagedIndexBuilt(m_task.m_indexPath);
 			}

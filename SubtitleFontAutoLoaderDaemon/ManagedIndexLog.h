@@ -158,4 +158,13 @@ namespace sfh
 
 		return BuildManagedIndexFontLogSummary(filtered);
 	}
+
+	inline std::wstring BuildManagedIndexFontSummaryLine(
+		const wchar_t* label,
+		const ManagedIndexFontLogSummary& summary)
+	{
+		return std::wstring(label) + L"："
+			+ std::to_wstring(summary.m_fontCount)
+			+ L" 个（" + summary.m_fontNamesSummary + L"）";
+	}
 }

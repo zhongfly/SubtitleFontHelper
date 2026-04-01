@@ -231,11 +231,19 @@ namespace sfh
 				daemon,
 				task.m_indexPath,
 				task.m_progressState,
-				task.m_enableProgressNotifications);
+				ManagedIndexWorkType::Build,
+				task.m_enableNotifications);
 			TryLogManagedIndexBuildStart(task);
 
 			try
 			{
+				if (task.m_enableNotifications)
+				{
+					TryShowToast(
+						L"Subtitle Font Helper",
+						L"开始建立索引：" + indexName);
+				}
+
 				auto isCancelled = [&]()
 				{
 					return stopToken.stop_requested();
@@ -243,16 +251,19 @@ namespace sfh
 
 				const auto fontFileCount = BuildManagedIndex(task, workerCount, isCancelled, feedback);
 
-				TryShowToast(
-					L"Subtitle Font Helper",
-					L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
+				if (task.m_enableNotifications)
+				{
+					TryShowToast(
+						L"Subtitle Font Helper",
+						L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
+				}
 				TryLogManagedIndexBuildComplete(task, fontFileCount);
 				daemon->NotifyManagedIndexBuilt(task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{
 				TryLogManagedIndexBuildFailure(task, e);
-				if (!stopToken.stop_requested())
+				if (!stopToken.stop_requested() && task.m_enableNotifications)
 				{
 					TryShowToast(
 						L"Subtitle Font Helper",

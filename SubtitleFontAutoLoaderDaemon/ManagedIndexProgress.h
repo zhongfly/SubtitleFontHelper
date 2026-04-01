@@ -21,9 +21,16 @@ namespace sfh
 		Writing
 	};
 
+	enum class ManagedIndexWorkType
+	{
+		Build = 0,
+		Update
+	};
+
 	struct ManagedIndexBuildProgressState
 	{
 		std::atomic<bool> m_buildInProgress = false;
+		std::atomic<ManagedIndexWorkType> m_workType = ManagedIndexWorkType::Build;
 		std::atomic<ManagedIndexBuildStage> m_stage = ManagedIndexBuildStage::Idle;
 		std::atomic<size_t> m_processedFiles = 0;
 		std::atomic<size_t> m_totalFiles = 0;
@@ -32,6 +39,7 @@ namespace sfh
 	struct ManagedIndexBuildProgressSnapshot
 	{
 		bool m_buildInProgress = false;
+		ManagedIndexWorkType m_workType = ManagedIndexWorkType::Build;
 		ManagedIndexBuildStage m_stage = ManagedIndexBuildStage::Idle;
 		size_t m_processedFiles = 0;
 		size_t m_totalFiles = 0;
@@ -48,6 +56,7 @@ namespace sfh
 		return
 		{
 			state.m_buildInProgress.load(std::memory_order_relaxed),
+			state.m_workType.load(std::memory_order_relaxed),
 			state.m_stage.load(std::memory_order_relaxed),
 			state.m_processedFiles.load(std::memory_order_relaxed),
 			state.m_totalFiles.load(std::memory_order_relaxed)
@@ -69,19 +78,23 @@ namespace sfh
 			return L"（已处理 " + std::to_wstring(processed) + L"/" + std::to_wstring(snapshot.m_totalFiles) + L"）";
 		};
 
+		const wchar_t* actionText = snapshot.m_workType == ManagedIndexWorkType::Update
+			? L"更新"
+			: L"建立";
+
 		switch (snapshot.m_stage)
 		{
 		case ManagedIndexBuildStage::Scanning:
-			return L"正在扫描字体目录：" + indexName;
+			return std::wstring(L"正在") + actionText + L"索引：" + indexName;
 		case ManagedIndexBuildStage::Hashing:
-			return L"正在整理重复字体：" + indexName + buildProgressSuffix();
+			return std::wstring(L"正在") + actionText + L"索引：" + indexName + buildProgressSuffix();
 		case ManagedIndexBuildStage::Analyzing:
-			return L"正在分析字体：" + indexName + buildProgressSuffix();
+			return std::wstring(L"正在") + actionText + L"索引：" + indexName + buildProgressSuffix();
 		case ManagedIndexBuildStage::Writing:
-			return L"正在写入索引：" + indexName;
+			return std::wstring(L"正在写入索引：") + indexName;
 		case ManagedIndexBuildStage::Idle:
 		default:
-			return L"正在建立索引：" + indexName;
+			return std::wstring(L"正在") + actionText + L"索引：" + indexName;
 		}
 	}
 
@@ -107,12 +120,13 @@ namespace sfh
 			IDaemon* daemon,
 			const std::filesystem::path& indexPath,
 			const std::shared_ptr<ManagedIndexBuildProgressState>& progressState,
-			bool enableProgressNotifications)
+			ManagedIndexWorkType workType,
+			bool enableNotifications)
 			: m_daemon(daemon),
 			  m_indexPath(indexPath),
 			  m_progressState(progressState)
 		{
-			if (enableProgressNotifications)
+			if (enableNotifications)
 			{
 				m_notifier = std::jthread([state = progressState, indexName = GetManagedIndexDisplayName(indexPath)](
 					std::stop_token stopToken)
@@ -147,6 +161,7 @@ namespace sfh
 			if (m_progressState)
 			{
 				m_progressState->m_buildInProgress.store(true, std::memory_order_relaxed);
+				m_progressState->m_workType.store(workType, std::memory_order_relaxed);
 				m_progressState->m_stage.store(ManagedIndexBuildStage::Idle, std::memory_order_relaxed);
 				m_progressState->m_processedFiles.store(0, std::memory_order_relaxed);
 				m_progressState->m_totalFiles.store(0, std::memory_order_relaxed);
@@ -163,6 +178,7 @@ namespace sfh
 			if (m_progressState)
 			{
 				m_progressState->m_buildInProgress.store(false, std::memory_order_relaxed);
+				m_progressState->m_workType.store(ManagedIndexWorkType::Build, std::memory_order_relaxed);
 				m_progressState->m_stage.store(ManagedIndexBuildStage::Idle, std::memory_order_relaxed);
 				m_progressState->m_processedFiles.store(0, std::memory_order_relaxed);
 				m_progressState->m_totalFiles.store(0, std::memory_order_relaxed);

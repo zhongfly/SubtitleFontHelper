@@ -95,7 +95,7 @@ namespace sfh
 			const std::unordered_set<std::wstring>& removedPaths,
 			const std::unordered_set<std::wstring>& modifiedPaths)
 		{
-			std::wstring message = L"索引同步完成：" + indexName
+			std::wstring message = L"索引更新完成：" + indexName
 				+ L"（新增 " + std::to_wstring(addedPaths.size())
 				+ L"，删除 " + std::to_wstring(removedPaths.size())
 				+ L"，修改 " + std::to_wstring(modifiedPaths.size())
@@ -768,7 +768,8 @@ namespace sfh
 					m_daemon,
 					m_task.m_indexPath,
 					m_task.m_progressState,
-					m_task.m_enableProgressNotifications);
+					ManagedIndexWorkType::Update,
+					m_task.m_enableNotifications);
 				if (m_hasLastSnapshot)
 				{
 					ApplyCachedHashes(m_lastSnapshot, newSnapshot);
@@ -912,18 +913,21 @@ namespace sfh
 				m_indexedPaths = std::move(newCanonicalPaths);
 				m_hasDatabase = true;
 
-				TryShowToast(
-					L"Subtitle Font Helper",
-					BuildSyncToastMessage(indexName, addedPaths, removedPaths, modifiedPaths));
+				if (m_task.m_enableNotifications)
+				{
+					TryShowToast(
+						L"Subtitle Font Helper",
+						BuildSyncToastMessage(indexName, addedPaths, removedPaths, modifiedPaths));
+				}
 				m_daemon->NotifyManagedIndexBuilt(m_task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{
-				if (!stopToken.stop_requested())
+				if (!stopToken.stop_requested() && m_task.m_enableNotifications)
 				{
 					TryShowToast(
 						L"Subtitle Font Helper",
-						L"索引同步失败：" + indexName + L"（" + Utf8ToWideString(e.what()) + L"）");
+						L"索引更新失败：" + indexName + L"（" + Utf8ToWideString(e.what()) + L"）");
 				}
 			}
 		}

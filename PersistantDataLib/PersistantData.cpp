@@ -723,6 +723,10 @@ namespace
 			{
 				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
 			}
+			else if (key == "missing_font_notification_ignore_queries")
+			{
+				m_config->missingFontNotificationIgnoreQueries = ExpectStringArray(value, key.c_str());
+			}
 		}
 
 		void ApplyIndexFileKey(const std::string& key, const TomlValue& value)

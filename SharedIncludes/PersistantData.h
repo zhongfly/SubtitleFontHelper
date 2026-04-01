@@ -27,6 +27,7 @@ namespace sfh
 		bool managedIndexNotifications = false;
 		bool managedIndexFailureNotifications = false;
 		bool missingFontNotifications = false;
+		std::vector<std::wstring> missingFontNotificationIgnoreQueries;
 
 		// content
 		std::vector<IndexFileElement> m_indexFile;

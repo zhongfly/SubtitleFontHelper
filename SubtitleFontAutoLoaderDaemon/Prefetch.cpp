@@ -9,7 +9,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
-
 template <typename T>
 class SimpleLRU
 {
@@ -133,12 +132,22 @@ class sfh::Prefetch::Implementation : public sfh::IRpcFeedbackHandler
 	IDaemon* m_daemon;
 	SimpleLRU<std::wstring> m_lru;
 	bool m_missingFontNotificationsEnabled = true;
+	std::vector<std::wstring> m_missingFontNotificationIgnoreQueries;
 
 	std::wstring m_cachePath;
 
 public:
-	Implementation(IDaemon* daemon, size_t prefetchCount, const std::wstring& lruPath, bool missingFontNotificationsEnabled)
-		: m_daemon(daemon), m_lru(prefetchCount), m_missingFontNotificationsEnabled(missingFontNotificationsEnabled), m_cachePath(lruPath)
+	Implementation(
+		IDaemon* daemon,
+		size_t prefetchCount,
+		const std::wstring& lruPath,
+		bool missingFontNotificationsEnabled,
+		std::vector<std::wstring> missingFontNotificationIgnoreQueries)
+		: m_daemon(daemon),
+		  m_lru(prefetchCount),
+		  m_missingFontNotificationsEnabled(missingFontNotificationsEnabled),
+		  m_missingFontNotificationIgnoreQueries(std::move(missingFontNotificationIgnoreQueries)),
+		  m_cachePath(lruPath)
 	{
 		LoadLruCache(m_cachePath);
 	}
@@ -186,6 +195,23 @@ private:
 	}
 
 public:
+	bool ShouldIgnoreMissingFontNotification(const std::wstring& missingQuery) const
+	{
+		for (const auto& ignoredQuery : m_missingFontNotificationIgnoreQueries)
+		{
+			if (CompareStringOrdinal(
+				ignoredQuery.c_str(),
+				-1,
+				missingQuery.c_str(),
+				-1,
+				TRUE) == CSTR_EQUAL)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void HandleFeedback(const FontQueryRequest& request) override
 	{
 		const auto& data = request.feedbackdata();
@@ -198,9 +224,14 @@ public:
 		{
 			try
 			{
+				const auto missingFamilyName = Utf8ToWideString(data.missingquery());
+				if (ShouldIgnoreMissingFontNotification(missingFamilyName))
+				{
+					return;
+				}
 				ToastNotifier().ShowToastAsync(
 					L"Subtitle Font Helper",
-					L"未找到字体：" + Utf8ToWideString(data.missingquery()));
+					L"未找到字体：" + missingFamilyName);
 			}
 			catch (...)
 			{
@@ -218,12 +249,14 @@ sfh::Prefetch::Prefetch(
 	IDaemon* daemon,
 	size_t prefetchCount,
 	const std::wstring& lruPath,
-	bool missingFontNotificationsEnabled)
+	bool missingFontNotificationsEnabled,
+	std::vector<std::wstring> missingFontNotificationIgnoreQueries)
 	: m_impl(std::make_unique<Implementation>(
 		daemon,
 		prefetchCount,
 		lruPath,
-		missingFontNotificationsEnabled))
+		missingFontNotificationsEnabled,
+		std::move(missingFontNotificationIgnoreQueries)))
 {
 }
 

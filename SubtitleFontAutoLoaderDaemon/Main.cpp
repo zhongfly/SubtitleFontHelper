@@ -633,7 +633,8 @@ namespace sfh
 				newService->m_messageSink.get(),
 				cfg->lruSize,
 				lruCachePath,
-				cfg->missingFontNotifications);
+				cfg->missingFontNotifications,
+				cfg->missingFontNotificationIgnoreQueries);
 			newService->m_queryService = std::make_unique<QueryService>(newService->m_messageSink.get());
 			newService->m_queryService->Load(std::move(dbs), false);
 			for (auto& process : cfg->m_monitorProcess)

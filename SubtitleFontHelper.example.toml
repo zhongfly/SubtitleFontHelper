@@ -9,6 +9,7 @@ monitor_processes = [
 # managed_index_notifications = true
 # managed_index_failure_notifications = true
 # missing_font_notifications = true
+# missing_font_notification_ignore_queries = ['Some Missing Font']
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'

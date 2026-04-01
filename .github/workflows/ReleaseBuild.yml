@@ -51,6 +51,7 @@ jobs:
           vcpkg_binary_cache\
           vcpkg_installed\${{ matrix.triplet }}\
         key: ${{ runner.os }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
+        restore-keys: ${{ runner.os }}-${{ matrix.triplet }}-vcpkg-
 
     - name: Prepare vcpkg directories
       shell: pwsh

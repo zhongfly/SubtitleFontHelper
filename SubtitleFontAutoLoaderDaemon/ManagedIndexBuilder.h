@@ -3,6 +3,7 @@
 #include "pch.h"
 #include "IDaemon.h"
 #include "ManagedIndexProgress.h"
+#include "PersistantData.h"
 
 #include <atomic>
 #include <functional>
@@ -35,7 +36,13 @@ namespace sfh
 		std::jthread m_worker;
 	};
 
-	size_t BuildManagedIndex(
+	struct ManagedIndexBuildResult
+	{
+		FontDatabase m_database;
+		size_t m_sourceFontFileCount = 0;
+	};
+
+	ManagedIndexBuildResult BuildManagedIndex(
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,

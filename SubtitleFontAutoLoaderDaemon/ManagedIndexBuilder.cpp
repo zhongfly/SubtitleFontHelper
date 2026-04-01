@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "EventLog.h"
+#include "ManagedIndexLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
 #include "../FontIndexCore/FontIndexCore.h"
@@ -50,14 +51,20 @@ namespace sfh
 			}
 		}
 
-		void TryLogManagedIndexBuildComplete(const ManagedIndexBuilder::Task& task, size_t fontFileCount)
+		void TryLogManagedIndexBuildComplete(
+			const ManagedIndexBuilder::Task& task,
+			const FontDatabase& db,
+			size_t fontFileCount)
 		{
 			try
 			{
+				const auto summary = BuildManagedIndexFontLogSummary(db);
 				EventLog::GetInstance().LogDebugMessage(
-					L"managed index build complete: index=\"%ls\" fontFileCount=%zu",
+					L"managed index build complete: index=\"%ls\" fontFileCount=%zu indexedFontCount=%zu fontNames=[%ls]",
 					task.m_indexPath.c_str(),
-					fontFileCount);
+					fontFileCount,
+					summary.m_fontCount,
+					summary.m_fontNamesSummary.c_str());
 			}
 			catch (...)
 			{
@@ -157,7 +164,7 @@ namespace sfh
 		}
 	}
 
-	size_t BuildManagedIndex(
+	ManagedIndexBuildResult BuildManagedIndex(
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
@@ -220,7 +227,7 @@ namespace sfh
 		ThrowIfCancelled(isCancelled);
 		FontIndexCore::WriteDirectorySnapshot(task.m_snapshotPath, snapshot);
 		ThrowIfCancelled(isCancelled);
-		return snapshot.m_files.size();
+		return { std::move(db), snapshot.m_files.size() };
 	}
 
 	ManagedIndexBuilder::ManagedIndexBuilder(IDaemon* daemon, Task task, size_t workerCount)
@@ -248,7 +255,8 @@ namespace sfh
 					return stopToken.stop_requested();
 				};
 
-				const auto fontFileCount = BuildManagedIndex(task, workerCount, isCancelled, feedback);
+				auto result = BuildManagedIndex(task, workerCount, isCancelled, feedback);
+				const auto fontFileCount = result.m_sourceFontFileCount;
 
 				if (task.m_enableNotifications)
 				{
@@ -256,7 +264,7 @@ namespace sfh
 						L"Subtitle Font Helper",
 						L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
 				}
-				TryLogManagedIndexBuildComplete(task, fontFileCount);
+				TryLogManagedIndexBuildComplete(task, result.m_database, fontFileCount);
 				daemon->NotifyManagedIndexBuilt(task.m_indexPath);
 			}
 			catch (const std::exception& e)

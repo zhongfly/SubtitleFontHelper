@@ -246,6 +246,7 @@
     <ClInclude Include="ConfigWatcher.h" />
     <ClInclude Include="IDaemon.h" />
     <ClInclude Include="ManagedIndexBuilder.h" />
+    <ClInclude Include="ManagedIndexLog.h" />
     <ClInclude Include="ManagedIndexWatcher.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Prefetch.h" />

@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "EventLog.h"
+#include "ManagedIndexLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
 #include "../FontIndexCore/FontIndexCore.h"
@@ -127,6 +128,42 @@ namespace sfh
 			try
 			{
 				ToastNotifier().ShowToast(title, message);
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexUpdateComplete(
+			const std::filesystem::path& indexPath,
+			const FontDatabase& updatedDatabase,
+			const FontDatabase& previousDatabase,
+			const std::unordered_set<std::wstring>& addedPaths,
+			const std::unordered_set<std::wstring>& removedPaths,
+			const std::unordered_set<std::wstring>& modifiedPaths)
+		{
+			try
+			{
+				const auto overallSummary = BuildManagedIndexFontLogSummary(updatedDatabase);
+				const auto addedSummary = BuildManagedIndexFontLogSummary(
+					updatedDatabase,
+					BuildManagedIndexPathKeys(addedPaths));
+				const auto removedSummary = BuildManagedIndexFontLogSummary(
+					previousDatabase,
+					BuildManagedIndexPathKeys(removedPaths));
+				const auto modifiedSummary = BuildManagedIndexFontLogSummary(
+					updatedDatabase,
+					BuildManagedIndexPathKeys(modifiedPaths));
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index update complete: index=\"%ls\" indexedFontCount=%zu added=%zu addedFontNames=[%ls] removed=%zu removedFontNames=[%ls] modified=%zu modifiedFontNames=[%ls]",
+					indexPath.c_str(),
+					overallSummary.m_fontCount,
+					addedPaths.size(),
+					addedSummary.m_fontNamesSummary.c_str(),
+					removedPaths.size(),
+					removedSummary.m_fontNamesSummary.c_str(),
+					modifiedPaths.size(),
+					modifiedSummary.m_fontNamesSummary.c_str());
 			}
 			catch (...)
 			{
@@ -777,6 +814,7 @@ namespace sfh
 				const auto groups = BuildContentGroups(newSnapshot, stopToken, feedback);
 				EnsureLoadedDatabase();
 				ThrowIfCancelled(isCancelled);
+				const auto previousDatabase = m_database;
 
 				std::unordered_map<std::wstring, const FontIndexCore::DirectorySnapshotEntry*> oldEntries;
 				oldEntries.reserve(m_lastSnapshot.m_files.size());
@@ -911,6 +949,13 @@ namespace sfh
 				m_hasLastSnapshot = true;
 				m_indexedPaths = std::move(newCanonicalPaths);
 				m_hasDatabase = true;
+				TryLogManagedIndexUpdateComplete(
+					m_task.m_indexPath,
+					m_database,
+					previousDatabase,
+					addedPaths,
+					removedPaths,
+					modifiedPaths);
 
 				if (m_task.m_enableNotifications)
 				{

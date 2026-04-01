@@ -71,10 +71,35 @@ namespace sfh
 		return L"<unnamed>";
 	}
 
+	inline std::wstring TruncateManagedIndexDisplayName(
+		const std::wstring& name,
+		size_t maxNameLength)
+	{
+		if (name.size() <= maxNameLength)
+		{
+			return name;
+		}
+
+		size_t truncatedLength = maxNameLength;
+		if (truncatedLength < name.size()
+			&& truncatedLength != 0
+			&& name[truncatedLength - 1] >= 0xD800
+			&& name[truncatedLength - 1] <= 0xDBFF
+			&& name[truncatedLength] >= 0xDC00
+			&& name[truncatedLength] <= 0xDFFF)
+		{
+			--truncatedLength;
+		}
+
+		auto truncated = name.substr(0, truncatedLength);
+		truncated += L"...";
+		return truncated;
+	}
+
 	inline ManagedIndexFontLogSummary BuildManagedIndexFontLogSummary(const FontDatabase& db)
 	{
 		constexpr size_t maxVisibleNames = 12;
-		constexpr size_t maxSummaryLength = 256;
+		constexpr size_t maxNameLength = 32;
 
 		std::vector<std::wstring> names;
 		names.reserve(db.m_fonts.size());
@@ -104,25 +129,24 @@ namespace sfh
 		std::wstring joined;
 		for (const auto& name : names)
 		{
-			std::wstring candidate = joined;
-			if (!candidate.empty())
-			{
-				candidate += L", ";
-			}
-			candidate += name;
-
-			if (visibleCount >= maxVisibleNames || candidate.size() > maxSummaryLength)
+			if (visibleCount >= maxVisibleNames)
 			{
 				break;
 			}
 
-			joined = std::move(candidate);
+			auto displayName = TruncateManagedIndexDisplayName(name, maxNameLength);
+
+			if (!joined.empty())
+			{
+				joined += L", ";
+			}
+			joined += displayName;
 			++visibleCount;
 		}
 
 		if (joined.empty())
 		{
-			joined = names.front().substr(0, maxSummaryLength);
+			joined = TruncateManagedIndexDisplayName(names.front(), maxNameLength);
 			visibleCount = 1;
 		}
 

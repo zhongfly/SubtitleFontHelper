@@ -1,12 +1,14 @@
 wmi_poll_interval = 1000
 lru_size = 100
-# managed_index_notifications = true
-# managed_index_failure_notifications = true
-# missing_font_notifications = true
 monitor_processes = [
 	'mpc-hc64_nvo.exe',
 	'mpc-hc_nvo.exe',
 ]
+
+[notifications]
+# managed_index_notifications = true
+# managed_index_failure_notifications = true
+# missing_font_notifications = true
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'

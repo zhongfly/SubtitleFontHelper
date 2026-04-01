@@ -185,6 +185,7 @@ namespace
 		enum class Context
 		{
 			Root = 0,
+			Notifications,
 			IndexFile,
 			Unknown
 		};
@@ -430,6 +431,11 @@ namespace
 			{
 				m_config->m_indexFile.emplace_back();
 				m_context = Context::IndexFile;
+				return;
+			}
+			if (!isArrayTable && tableName == "notifications")
+			{
+				m_context = Context::Notifications;
 				return;
 			}
 
@@ -687,18 +693,6 @@ namespace
 			{
 				m_config->lruSize = ExpectUInt32(value, key.c_str());
 			}
-			else if (key == "managed_index_notifications")
-			{
-				m_config->managedIndexNotifications = ExpectBool(value, key.c_str());
-			}
-			else if (key == "managed_index_failure_notifications")
-			{
-				m_config->managedIndexFailureNotifications = ExpectBool(value, key.c_str());
-			}
-			else if (key == "missing_font_notifications")
-			{
-				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
-			}
 			else if (key == "monitor_processes")
 			{
 				for (const auto& process : ExpectStringArray(value, key.c_str()))
@@ -712,6 +706,22 @@ namespace
 				{
 					m_config->m_indexFile.push_back({ path });
 				}
+			}
+		}
+
+		void ApplyNotificationsKey(const std::string& key, const TomlValue& value)
+		{
+			if (key == "managed_index_notifications")
+			{
+				m_config->managedIndexNotifications = ExpectBool(value, key.c_str());
+			}
+			else if (key == "managed_index_failure_notifications")
+			{
+				m_config->managedIndexFailureNotifications = ExpectBool(value, key.c_str());
+			}
+			else if (key == "missing_font_notifications")
+			{
+				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
 			}
 		}
 
@@ -743,6 +753,9 @@ namespace
 			{
 			case Context::Root:
 				ApplyRootKey(key, value);
+				break;
+			case Context::Notifications:
+				ApplyNotificationsKey(key, value);
 				break;
 			case Context::IndexFile:
 				ApplyIndexFileKey(key, value);

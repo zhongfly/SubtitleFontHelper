@@ -39,13 +39,15 @@
 ```
 wmi_poll_interval = 1000
 lru_size = 100
-# managed_index_notifications = true
-# managed_index_failure_notifications = true
-# missing_font_notifications = true
 monitor_processes = [
   'mpc-hc64_nvo.exe',
   'mpc-hc_nvo.exe',
 ]
+
+[notifications]
+# managed_index_notifications = true
+# managed_index_failure_notifications = true
+# missing_font_notifications = true
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'
@@ -64,14 +66,15 @@ source_folders = [
  - 程序只读取 `SubtitleFontHelper.toml`。
  - `wmi_poll_interval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
  - `lru_size` 指定服务启动时预加载的条目最大大小。
- - `managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
- - `managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认关闭。
- - `missing_font_notifications` 控制缺失字体提示。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
+ - `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
+ - `[notifications]` 用于集中放置所有系统通知相关开关。
+ - `[notifications].managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
+ - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认关闭。
+ - `[notifications].missing_font_notifications` 控制缺失字体提示。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
  - 每一节 `[[index_files]]` 都表示一个字体索引文件的配置：其中 `path` 用来设置字体索引文件的保存位置和名称； `source_folders` 表示字体索引文件所覆盖的字体文件来源，在字体索引文件已经存在时，可省略，省略后将不再监视其中的字体文件变化。
  - TOML 里的 `[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。
  - 字体索引文件中 的 `FontFace/@path` 会在可行时写成相对索引文件目录的路径；程序读取后会统一解析成绝对路径。
  - 字体索引文件 的 `.state.bin` 快照会在可行时写成相对快照文件目录的路径，这个快照用于记录建立字体索引时的字体文件位置，以便更快速地、增量更新字体索引文件。
- - `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
  - TOML 中**当前支持类型**的未知键会被忽略。
 
 ### FontLoaderInterceptor32.dll

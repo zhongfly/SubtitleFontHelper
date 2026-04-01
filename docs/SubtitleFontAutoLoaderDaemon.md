@@ -38,7 +38,7 @@ flowchart LR
 
 ## 2. 运行时文件与配置
 
-默认约定：daemon 从 **exe 同目录**读取配置 `SubtitleFontHelper.toml`，并在同目录读写 `lruCache.txt`。当前 TOML 读取实现支持本项目所需的简单子集：正整数、字符串、字符串数组，以及 `[[index_files]]` 表。
+默认约定：daemon 从 **exe 同目录**读取配置 `SubtitleFontHelper.toml`，并在同目录读写 `lruCache.txt`。当前 TOML 读取实现支持本项目所需的简单子集：正整数、字符串、字符串数组，以及 `[notifications]` 和 `[[index_files]]` 表。
 
 典型运行目录（按 `copyFiles.ps1` 的打包方式）包含：
 
@@ -54,10 +54,12 @@ flowchart LR
 ```toml
 wmi_poll_interval = 1000
 lru_size = 100
+monitor_processes = ["mpc-hc64.exe", "mpc-hc.exe"]
+
+[notifications]
 managed_index_notifications = true
 managed_index_failure_notifications = false
 missing_font_notifications = false
-monitor_processes = ["mpc-hc64.exe", "mpc-hc.exe"]
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'
@@ -72,9 +74,10 @@ source_folders = ['fonts']
 - `monitor_processes`：要监控的进程“路径或进程名”。实现上是**后缀匹配**（忽略大小写）并要求边界为路径起点或分隔符。
 - `wmi_poll_interval`：WMI 轮询间隔（毫秒）。越小越及时，但 WMI/CPU 压力越大。
 - `lru_size`：预取 LRU 容量（条目数）。
-- `managed_index_notifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成。
-- `managed_index_failure_notifications`：单独控制索引失败通知。默认关闭；包括索引建立失败和更新失败。
-- `missing_font_notifications`：缺失字体系统通知开关。默认关闭；仅当索引查询无结果且系统字体也不存在时才提示。
+- `[notifications]`：集中定义所有系统通知相关开关。
+- `[notifications].managed_index_notifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成。
+- `[notifications].managed_index_failure_notifications`：单独控制索引失败通知。默认关闭；包括索引建立失败和更新失败。
+- `[notifications].missing_font_notifications`：缺失字体系统通知开关。默认关闭；仅当索引查询无结果且系统字体也不存在时才提示。
 - daemon 只读取 `SubtitleFontHelper.toml`。
 
 ## 3. 启动与生命周期（Main.cpp）

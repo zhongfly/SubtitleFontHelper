@@ -231,8 +231,7 @@ namespace sfh
 				daemon,
 				task.m_indexPath,
 				task.m_progressState,
-				ManagedIndexWorkType::Build,
-				task.m_enableNotifications);
+				ManagedIndexWorkType::Build);
 			TryLogManagedIndexBuildStart(task);
 
 			try

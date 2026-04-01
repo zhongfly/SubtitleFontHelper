@@ -1,14 +1,10 @@
 #pragma once
 
 #include "IDaemon.h"
-#include "ToastNotifier.h"
-
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <filesystem>
 #include <memory>
-#include <thread>
 #include <vector>
 
 namespace sfh
@@ -119,56 +115,6 @@ namespace sfh
 		return snapshot;
 	}
 
-	inline std::wstring BuildManagedIndexProgressMessage(
-		const std::wstring& indexName,
-		const ManagedIndexBuildProgressSnapshot& snapshot)
-	{
-		auto buildProgressSuffix = [&]()
-		{
-			if (snapshot.m_totalFiles == 0)
-			{
-				return std::wstring();
-			}
-
-			const auto processed = (std::min)(snapshot.m_processedFiles, snapshot.m_totalFiles);
-			return L"（已处理 " + std::to_wstring(processed) + L"/" + std::to_wstring(snapshot.m_totalFiles) + L"）";
-		};
-
-		const wchar_t* actionText = snapshot.m_workType == ManagedIndexWorkType::Update
-			? L"更新"
-			: L"建立";
-
-		switch (snapshot.m_stage)
-		{
-		case ManagedIndexBuildStage::Scanning:
-			return std::wstring(L"正在") + actionText + L"索引：" + indexName;
-		case ManagedIndexBuildStage::Hashing:
-			return std::wstring(L"正在") + actionText + L"索引：" + indexName + buildProgressSuffix();
-		case ManagedIndexBuildStage::Analyzing:
-			return std::wstring(L"正在") + actionText + L"索引：" + indexName + buildProgressSuffix();
-		case ManagedIndexBuildStage::Writing:
-			return std::wstring(L"正在写入索引：") + indexName;
-		case ManagedIndexBuildStage::Idle:
-		default:
-			return std::wstring(L"正在") + actionText + L"索引：" + indexName;
-		}
-	}
-
-	inline void TryShowManagedIndexProgressToast(
-		const std::wstring& indexName,
-		const ManagedIndexBuildProgressSnapshot& snapshot)
-	{
-		try
-		{
-			ToastNotifier().ShowToast(
-				L"Subtitle Font Helper",
-				BuildManagedIndexProgressMessage(indexName, snapshot));
-		}
-		catch (...)
-		{
-		}
-	}
-
 	class ManagedIndexBuildFeedbackSession
 	{
 	public:
@@ -176,44 +122,11 @@ namespace sfh
 			IDaemon* daemon,
 			const std::filesystem::path& indexPath,
 			const std::shared_ptr<ManagedIndexBuildProgressState>& progressState,
-			ManagedIndexWorkType workType,
-			bool enableNotifications)
+			ManagedIndexWorkType workType)
 			: m_daemon(daemon),
 			  m_indexPath(indexPath),
 			  m_progressState(progressState)
 		{
-			if (enableNotifications)
-			{
-				m_notifier = std::jthread([state = progressState, indexName = GetManagedIndexDisplayName(indexPath)](
-					std::stop_token stopToken)
-				{
-					if (!state)
-					{
-						return;
-					}
-
-					constexpr auto notifyInterval = std::chrono::seconds(30);
-					auto nextNotificationAt = std::chrono::steady_clock::now() + notifyInterval;
-
-					while (!stopToken.stop_requested())
-					{
-						const auto now = std::chrono::steady_clock::now();
-						if (now >= nextNotificationAt)
-						{
-							if (state->m_buildInProgress.load(std::memory_order_relaxed))
-							{
-								TryShowManagedIndexProgressToast(
-									indexName,
-									CaptureManagedIndexBuildProgressSnapshot(*state));
-							}
-							nextNotificationAt = now + notifyInterval;
-						}
-
-						std::this_thread::sleep_for(std::chrono::milliseconds(500));
-					}
-				});
-			}
-
 			if (m_progressState)
 			{
 				m_progressState->m_buildInProgress.store(true, std::memory_order_relaxed);
@@ -238,12 +151,6 @@ namespace sfh
 				m_progressState->m_stage.store(ManagedIndexBuildStage::Idle, std::memory_order_relaxed);
 				m_progressState->m_processedFiles.store(0, std::memory_order_relaxed);
 				m_progressState->m_totalFiles.store(0, std::memory_order_relaxed);
-			}
-
-			m_notifier.request_stop();
-			if (m_notifier.joinable())
-			{
-				m_notifier.join();
 			}
 
 			if (m_daemon)
@@ -277,6 +184,5 @@ namespace sfh
 		IDaemon* m_daemon = nullptr;
 		std::filesystem::path m_indexPath;
 		std::shared_ptr<ManagedIndexBuildProgressState> m_progressState;
-		std::jthread m_notifier;
 	};
 }

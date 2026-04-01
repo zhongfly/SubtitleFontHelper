@@ -768,8 +768,7 @@ namespace sfh
 					m_daemon,
 					m_task.m_indexPath,
 					m_task.m_progressState,
-					ManagedIndexWorkType::Update,
-					m_task.m_enableNotifications);
+					ManagedIndexWorkType::Update);
 				if (m_hasLastSnapshot)
 				{
 					ApplyCachedHashes(m_lastSnapshot, newSnapshot);

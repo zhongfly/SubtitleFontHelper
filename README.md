@@ -63,7 +63,7 @@ source_folders = [
  - 优先读取 `SubtitleFontHelper.toml`，只有在它不存在时才会回退到 `SubtitleFontHelper.xml`。
  - `wmi_poll_interval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
  - `lru_size` 指定服务启动时预加载的条目最大大小。
- - `managed_index_notifications` 统一控制字体索引相关系统通知。默认关闭；只有设置为 `true` 时，才会在索引开始建立、建立完成、更新完成、失败以及长时间处理中的进度变化时发出系统通知。托盘里的“构建中/更新中”状态不受这个开关影响。
+ - `managed_index_notifications` 统一控制字体索引相关系统通知。默认关闭；只有设置为 `true` 时，才会在索引开始建立、建立完成、更新完成、失败时发出系统通知。托盘里的“构建中/更新中”状态不受这个开关影响。
  - `missing_font_notifications` 控制缺失字体提示。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
  - 每一节 `[[index_files]]` 都表示一个字体索引文件的配置：其中 `path` 用来设置字体索引文件的保存位置和名称； `source_folders` 表示字体索引文件所覆盖的字体文件来源，在字体索引文件已经存在时，可省略，省略后将不再监视其中的字体文件变化。
  - TOML 里的 `[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。XML 格式的配置不支持使用相对路径。 

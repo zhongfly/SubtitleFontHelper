@@ -72,7 +72,7 @@ source_folders = ['fonts']
 - `monitor_processes` / `MonitorProcess`：要监控的进程“路径或进程名”。实现上是**后缀匹配**（忽略大小写）并要求边界为路径起点或分隔符。
 - `wmi_poll_interval` / `wmiPollInterval`：WMI 轮询间隔（毫秒）。越小越及时，但 WMI/CPU 压力越大。
 - `lru_size` / `lruSize`：预取 LRU 容量（条目数）。
-- `managed_index_notifications` / `managedIndexNotifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成、失败，以及长时间处理中的进度通知。
+- `managed_index_notifications` / `managedIndexNotifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成、失败。
 - `missing_font_notifications` / `missingFontNotifications`：缺失字体系统通知开关。默认关闭；仅当索引查询无结果且系统字体也不存在时才提示。
 - `SubtitleFontHelper.toml` 只要存在就会被优先读取；只有在该文件不存在时才会回退 XML。
 - XML 仅用于兼容旧版本配置；新部署建议只提供 TOML，旧 XML 配置不在本次相对路径增强范围内。

@@ -77,7 +77,7 @@ source_folders = ['fonts']
 - `lru_size`：预取 LRU 容量（条目数）。
 - `[notifications]`：集中定义所有系统通知相关开关。
 - `[notifications].managed_index_notifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成。
-- `[notifications].managed_index_failure_notifications`：单独控制索引失败通知。默认关闭；包括索引建立失败和更新失败。
+- `[notifications].managed_index_failure_notifications`：单独控制索引失败通知。默认开启；包括索引建立失败和更新失败。
 - `[notifications].missing_font_notifications`：缺失字体系统通知开关。默认关闭；仅当索引查询无结果且系统字体也不存在时才提示。
 - `[notifications].missing_font_notification_ignore_queries`：字符串列表。启用缺失字体通知后，如果 `missingQuery` 以 Win32 不区分大小写规则精确命中该列表，则不发送缺失字体 toast。
 - daemon 只读取 `SubtitleFontHelper.toml`。

@@ -70,7 +70,7 @@ source_folders = [
  - `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
  - `[notifications]` 用于集中放置所有系统通知相关开关。
  - `[notifications].managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
- - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认关闭。
+ - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认开启。
  - `[notifications].missing_font_notifications` 控制字体缺失通知。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
  - `[notifications].missing_font_notification_ignore_queries` 是一个字符串列表。启用字体缺失通知后，如果某个字体缺失并且名称精确命中这个列表，就不发送相应的字体缺失通知。
  - 每一节 `[[index_files]]` 都表示一个字体索引文件的配置：其中 `path` 用来设置字体索引文件的保存位置和名称； `source_folders` 表示字体索引文件所覆盖的字体文件来源，在字体索引文件已经存在时，可省略，省略后将不再监视其中的字体文件变化。

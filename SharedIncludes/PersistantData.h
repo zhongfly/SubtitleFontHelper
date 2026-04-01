@@ -25,7 +25,7 @@ namespace sfh
 		uint32_t wmiPollInterval = 500;
 		uint32_t lruSize = 100;
 		bool managedIndexNotifications = false;
-		bool managedIndexFailureNotifications = false;
+		bool managedIndexFailureNotifications = true;
 		bool missingFontNotifications = false;
 		std::vector<std::wstring> missingFontNotificationIgnoreQueries;
 

@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <shellapi.h>
+#include <strsafe.h>
 #include <wil/win32_helpers.h>
 #include <wil/resource.h>
 
@@ -14,6 +15,8 @@ class sfh::SystemTray::Implementation
 private:
 	constexpr static UINT WM_TRAY_ICON_MESSAGE = WM_USER;
 	constexpr static UINT WM_UPDATE_TRAY_ICON_MESSAGE = WM_USER + 1;
+	constexpr static UINT_PTR TRAY_REFRESH_TIMER_ID = 1;
+	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
 
 	NOTIFYICONDATAW m_iconData = {};
 	HWND m_hWnd = nullptr;
@@ -23,7 +26,11 @@ private:
 	std::atomic<size_t> m_checkPoint = 0;
 
 	std::atomic<bool> m_startupLoading = true;
+	std::atomic<size_t> m_managedIndexActiveCount = 0;
 	std::atomic<size_t> m_managedIndexBuildCount = 0;
+	std::atomic<size_t> m_managedIndexUpdateCount = 0;
+	std::atomic<size_t> m_managedIndexProcessedFiles = 0;
+	std::atomic<size_t> m_managedIndexTotalFiles = 0;
 	std::atomic<bool> m_exitRequested = false;
 	wil::unique_event m_startEvent;
 public:
@@ -67,9 +74,13 @@ public:
 		m_startEvent.SetEvent();
 	}
 
-	void SetManagedIndexBuildCount(size_t buildCount)
+	void SetManagedIndexTrayProgress(const ManagedIndexTrayProgressSnapshot& snapshot)
 	{
-		m_managedIndexBuildCount = buildCount;
+		m_managedIndexActiveCount = snapshot.m_activeCount;
+		m_managedIndexBuildCount = snapshot.m_buildCount;
+		m_managedIndexUpdateCount = snapshot.m_updateCount;
+		m_managedIndexProcessedFiles = snapshot.m_processedFiles;
+		m_managedIndexTotalFiles = snapshot.m_totalFiles;
 		if (m_hWnd != nullptr)
 			PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
 	}
@@ -84,7 +95,49 @@ public:
 private:
 	bool IsLoading() const
 	{
-		return m_startupLoading.load() || m_managedIndexBuildCount.load() != 0;
+		return m_startupLoading.load() || m_managedIndexActiveCount.load() != 0;
+	}
+
+	std::wstring BuildLoadingTooltip() const
+	{
+		if (m_startupLoading.load())
+		{
+			return L"SubtitleFontAutoLoaderDaemon - 正在加载";
+		}
+
+		const auto activeCount = m_managedIndexActiveCount.load();
+		if (activeCount == 0)
+		{
+			return L"SubtitleFontAutoLoaderDaemon";
+		}
+
+		const auto buildCount = m_managedIndexBuildCount.load();
+		const auto updateCount = m_managedIndexUpdateCount.load();
+		const auto processedFiles = m_managedIndexProcessedFiles.load();
+		const auto totalFiles = m_managedIndexTotalFiles.load();
+
+		std::wstring actionText;
+		if (buildCount != 0 && updateCount != 0)
+		{
+			actionText = L"建立/更新";
+		}
+		else if (updateCount != 0)
+		{
+			actionText = L"更新";
+		}
+		else
+		{
+			actionText = L"建立";
+		}
+
+		std::wstring tooltip = L"SubtitleFontAutoLoaderDaemon - 正在" + actionText
+			+ std::to_wstring(activeCount) + L"个索引";
+		if (totalFiles != 0)
+		{
+			tooltip += L"：进度" + std::to_wstring((std::min)(processedFiles, totalFiles))
+				+ L"/" + std::to_wstring(totalFiles);
+		}
+		return tooltip;
 	}
 
 	void SetupMessageWindow()
@@ -129,18 +182,8 @@ private:
 		}
 		if (IsLoading())
 		{
-			if (m_startupLoading.load())
-			{
-				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在加载");
-			}
-			else if (m_managedIndexBuildCount.load() == 1)
-			{
-				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在建立索引");
-			}
-			else
-			{
-				wcscpy_s(m_iconData.szTip, L"SubtitleFontAutoLoaderDaemon - 正在建立多个索引");
-			}
+			const auto tooltip = BuildLoadingTooltip();
+			StringCchCopyW(m_iconData.szTip, std::size(m_iconData.szTip), tooltip.c_str());
 			m_iconData.hIcon = LoadIconW(wil::GetModuleInstanceHandle(), MAKEINTRESOURCEW(IDI_TRAYICONLOADING));
 		}
 		else
@@ -172,12 +215,21 @@ private:
 		switch (uMsg)
 		{
 		case WM_CREATE:
+			SetTimer(hWnd, TRAY_REFRESH_TIMER_ID, TRAY_REFRESH_INTERVAL_MS, nullptr);
 			SetupTrayIcon(true);
+			break;
+		case WM_TIMER:
+			if (wParam == TRAY_REFRESH_TIMER_ID)
+			{
+				SetupTrayIcon(false);
+				return 0;
+			}
 			break;
 		case WM_ENDSESSION:
 			m_daemon->NotifyExit();
 			break;
 		case WM_CLOSE:
+			KillTimer(hWnd, TRAY_REFRESH_TIMER_ID);
 			DestroyTrayIcon();
 			DestroyWindow(hWnd);
 			break;
@@ -259,9 +311,9 @@ void sfh::SystemTray::Start()
 	m_impl->Start();
 }
 
-void sfh::SystemTray::SetManagedIndexBuildCount(size_t buildCount)
+void sfh::SystemTray::SetManagedIndexTrayProgress(const ManagedIndexTrayProgressSnapshot& snapshot)
 {
-	m_impl->SetManagedIndexBuildCount(buildCount);
+	m_impl->SetManagedIndexTrayProgress(snapshot);
 }
 
 void sfh::SystemTray::NotifyFinishLoad()

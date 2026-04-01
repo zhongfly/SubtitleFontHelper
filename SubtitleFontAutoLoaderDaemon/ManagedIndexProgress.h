@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace sfh
 {
@@ -45,6 +46,25 @@ namespace sfh
 		size_t m_totalFiles = 0;
 	};
 
+	struct ManagedIndexTrayProgressSnapshot
+	{
+		size_t m_activeCount = 0;
+		size_t m_buildCount = 0;
+		size_t m_updateCount = 0;
+		size_t m_processedFiles = 0;
+		size_t m_totalFiles = 0;
+
+		bool HasActiveWork() const
+		{
+			return m_activeCount != 0;
+		}
+
+		bool HasProgress() const
+		{
+			return m_totalFiles != 0;
+		}
+	};
+
 	inline std::wstring GetManagedIndexDisplayName(const std::filesystem::path& path)
 	{
 		return path.filename().empty() ? path.wstring() : path.filename().wstring();
@@ -61,6 +81,42 @@ namespace sfh
 			state.m_processedFiles.load(std::memory_order_relaxed),
 			state.m_totalFiles.load(std::memory_order_relaxed)
 		};
+	}
+
+	inline ManagedIndexTrayProgressSnapshot CaptureManagedIndexTrayProgressSnapshot(
+		const std::vector<std::shared_ptr<ManagedIndexBuildProgressState>>& states)
+	{
+		ManagedIndexTrayProgressSnapshot snapshot;
+		for (const auto& state : states)
+		{
+			if (!state)
+			{
+				continue;
+			}
+
+			const auto item = CaptureManagedIndexBuildProgressSnapshot(*state);
+			if (!item.m_buildInProgress)
+			{
+				continue;
+			}
+
+			++snapshot.m_activeCount;
+			if (item.m_workType == ManagedIndexWorkType::Update)
+			{
+				++snapshot.m_updateCount;
+			}
+			else
+			{
+				++snapshot.m_buildCount;
+			}
+
+			if (item.m_totalFiles != 0)
+			{
+				snapshot.m_totalFiles += item.m_totalFiles;
+				snapshot.m_processedFiles += (std::min)(item.m_processedFiles, item.m_totalFiles);
+			}
+		}
+		return snapshot;
 	}
 
 	inline std::wstring BuildManagedIndexProgressMessage(

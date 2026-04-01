@@ -112,14 +112,6 @@ namespace sfh
 			watchFiles.emplace_back(directory / L"SubtitleFontHelper.xml");
 		}
 
-		std::wstring MakeManagedIndexKey(const std::filesystem::path& path)
-		{
-			std::error_code ec;
-			const auto normalized = std::filesystem::absolute(path, ec).lexically_normal();
-			std::wstring key = (ec ? path.lexically_normal() : normalized).wstring();
-			std::transform(key.begin(), key.end(), key.begin(), towlower);
-			return key;
-		}
 	}
 
 	class SingleInstanceLock
@@ -314,6 +306,7 @@ namespace sfh
 			std::vector<std::unique_ptr<ManagedIndexBuilder>> m_managedIndexBuilders;
 			std::vector<std::unique_ptr<ManagedIndexWatcher>> m_managedIndexWatchers;
 			std::vector<IndexSlot> m_indexSlots;
+			std::vector<std::shared_ptr<ManagedIndexBuildProgressState>> m_managedIndexProgressStates;
 		};
 
 		std::mutex m_serviceAccessLock;
@@ -321,7 +314,6 @@ namespace sfh
 		std::unique_ptr<RpcServer> m_rpcServer;
 		std::unique_ptr<ProcessMonitor> m_processMonitor;
 		std::unique_ptr<Service> m_service;
-		std::unordered_set<std::wstring> m_activeManagedIndexBuilds;
 		uint64_t m_activeServiceGeneration = 0;
 		uint64_t m_nextServiceGeneration = 1;
 
@@ -489,18 +481,28 @@ namespace sfh
 				return;
 			}
 
-			m_systemTray->SetManagedIndexBuildCount(m_activeManagedIndexBuilds.size());
+			std::vector<std::shared_ptr<ManagedIndexBuildProgressState>> progressStates;
+			{
+				std::lock_guard lg(m_serviceAccessLock);
+				if (m_service != nullptr)
+				{
+					progressStates = m_service->m_managedIndexProgressStates;
+				}
+			}
+
+			m_systemTray->SetManagedIndexTrayProgress(
+				CaptureManagedIndexTrayProgressSnapshot(progressStates));
 		}
 
 		void OnManagedIndexBuildStarted(const std::filesystem::path& indexPath)
 		{
-			m_activeManagedIndexBuilds.insert(MakeManagedIndexKey(indexPath));
+			(void)indexPath;
 			UpdateManagedIndexBuildTrayState();
 		}
 
 		void OnManagedIndexBuildFinished(const std::filesystem::path& indexPath)
 		{
-			m_activeManagedIndexBuilds.erase(MakeManagedIndexKey(indexPath));
+			(void)indexPath;
 			UpdateManagedIndexBuildTrayState();
 		}
 
@@ -564,7 +566,6 @@ namespace sfh
 			std::vector<std::filesystem::path> watchFiles;
 			std::vector<ManagedIndexBuilder::Task> managedIndexBuildTasks;
 			std::vector<ManagedIndexWatcher::Options> managedIndexWatchOptions;
-			std::vector<std::filesystem::path> managedIndexActivePaths;
 			std::vector<std::wstring> monitorProcess;
 			AppendConfigWatchFiles(watchFiles, selfPath);
 			for (auto& indexFile : cfg->m_indexFile)
@@ -583,6 +584,7 @@ namespace sfh
 					managedTask.m_snapshotPath = FontIndexCore::GetDirectorySnapshotPath(indexPath);
 					managedTask.m_sourceFolders = sourceFolders;
 					managedTask.m_progressState = std::make_shared<ManagedIndexBuildProgressState>();
+					newService->m_managedIndexProgressStates.push_back(managedTask.m_progressState);
 					managedTask.m_enableNotifications = cfg->managedIndexNotifications;
 					watchOptions.m_workerCount = managedBuildWorkerCount;
 
@@ -621,7 +623,6 @@ namespace sfh
 
 				if (managedIndexNeedsBuild)
 				{
-					managedIndexActivePaths.push_back(indexPath);
 					watchOptions.m_task = managedTask;
 					watchOptions.m_skipInitialSync = true;
 					managedIndexBuildTasks.push_back(std::move(managedTask));
@@ -681,11 +682,6 @@ namespace sfh
 					std::move(monitorProcess),
 					std::chrono::milliseconds(cfg->wmiPollInterval));
 				m_activeServiceGeneration = serviceGeneration;
-				m_activeManagedIndexBuilds.clear();
-				for (const auto& indexPath : managedIndexActivePaths)
-				{
-					m_activeManagedIndexBuilds.insert(MakeManagedIndexKey(indexPath));
-				}
 				oldService = std::move(m_service);
 				m_service = std::move(newService);
 				m_service->m_messageSink->ActivateAndFlush();

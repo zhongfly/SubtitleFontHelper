@@ -3,6 +3,7 @@
 #include "pch.h"
 
 #include "IDaemon.h"
+#include "ManagedIndexProgress.h"
 
 namespace sfh
 {
@@ -22,7 +23,7 @@ namespace sfh
 		SystemTray& operator=(SystemTray&&) = delete;
 
 		void Start();
-		void SetManagedIndexBuildCount(size_t buildCount);
+		void SetManagedIndexTrayProgress(const ManagedIndexTrayProgressSnapshot& snapshot);
 		void NotifyFinishLoad();
 	};
 }

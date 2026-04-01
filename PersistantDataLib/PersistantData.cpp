@@ -716,9 +716,9 @@ namespace
 			{
 				m_config->lruSize = ExpectUInt32(value, key.c_str());
 			}
-			else if (key == "managed_index_progress_notifications" || key == "managedIndexProgressNotifications")
+			else if (key == "managed_index_notifications" || key == "managedIndexNotifications")
 			{
-				m_config->managedIndexProgressNotifications = ExpectBool(value, key.c_str());
+				m_config->managedIndexNotifications = ExpectBool(value, key.c_str());
 			}
 			else if (key == "missing_font_notifications" || key == "missingFontNotifications")
 			{
@@ -950,7 +950,7 @@ namespace
 
 					DEFINE_XML_ATTRIBUTE(wmiPollInterval);
 					DEFINE_XML_ATTRIBUTE(lruSize);
-					DEFINE_XML_ATTRIBUTE(managedIndexProgressNotifications);
+					DEFINE_XML_ATTRIBUTE(managedIndexNotifications);
 					DEFINE_XML_ATTRIBUTE(missingFontNotifications);
 
 #undef DEFINE_XML_ATTRIBUTE
@@ -985,8 +985,8 @@ namespace
 						pAttributes->getValueFromName(
 							L"",
 							0,
-							managedIndexProgressNotifications,
-							managedIndexProgressNotificationsCch,
+							managedIndexNotifications,
+							managedIndexNotificationsCch,
 							&attrValue,
 							&attrLength)))
 					{
@@ -997,7 +997,7 @@ namespace
 							{
 								return E_FAIL;
 							}
-							m_config->managedIndexProgressNotifications = boolValue;
+							m_config->managedIndexNotifications = boolValue;
 						}
 						catch (...)
 						{
@@ -1504,11 +1504,11 @@ namespace sfh
 		InitVariantFromString(std::to_wstring(config.lruSize).c_str(), value.addressof());
 		THROW_IF_FAILED(rootElement->setAttribute(wil::make_bstr(L"lruSize").get(), value));
 		InitVariantFromString(
-			config.managedIndexProgressNotifications ? L"true" : L"false",
+			config.managedIndexNotifications ? L"true" : L"false",
 			value.addressof());
 		THROW_IF_FAILED(
 			rootElement->setAttribute(
-				wil::make_bstr(L"managedIndexProgressNotifications").get(),
+				wil::make_bstr(L"managedIndexNotifications").get(),
 				value));
 		InitVariantFromString(
 			config.missingFontNotifications ? L"true" : L"false",

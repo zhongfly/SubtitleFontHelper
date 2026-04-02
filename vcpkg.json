@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
   "name": "subtitle-font-helper",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "dependencies": [
     "detours",
     "protobuf",

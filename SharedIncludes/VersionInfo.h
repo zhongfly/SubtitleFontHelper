@@ -3,11 +3,11 @@
 
 #define SFH_VERSION_MAJOR 1
 #define SFH_VERSION_MINOR 2
-#define SFH_VERSION_PATCH 3
+#define SFH_VERSION_PATCH 4
 #define SFH_VERSION_BUILD 0
 
-#define SFH_VERSION_NUMERIC 1,2,3,0
-#define SFH_VERSION_STRING "1.2.3"
+#define SFH_VERSION_NUMERIC 1,2,4,0
+#define SFH_VERSION_STRING "1.2.4"
 #define SFH_COMPANY_NAME "SubtitleFontHelper"
 #define SFH_PRODUCT_NAME "SubtitleFontHelper"
 #define SFH_LEGAL_COPYRIGHT "Copyright (C) SubtitleFontHelper"

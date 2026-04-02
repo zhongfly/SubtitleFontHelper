@@ -365,12 +365,13 @@ void sfh::EventLog::LogDllAttach(uint32_t processId)
 }
 
 void sfh::EventLog::LogDllQuerySuccess(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
-	const std::vector<const wchar_t*> responsePaths)
+	const wchar_t* matchSource, const std::vector<const wchar_t*> responsePaths)
 {
 	std::wostringstream oss;
 	oss << L"QuerySuccess processId=" << processId
 		<< L" threadId=" << threadId
 		<< L" request=\"" << (requestName ? requestName : L"NULL") << L"\""
+		<< L" source=\"" << (matchSource ? matchSource : L"unknown") << L"\""
 		<< L" paths=[" << JoinResponsePaths(responsePaths) << L"]";
 	WriteEventLogLine(L"INFO", L"dll", oss.str());
 }

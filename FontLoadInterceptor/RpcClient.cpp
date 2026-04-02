@@ -449,7 +449,14 @@ namespace sfh
 			|| std::ranges::find(face.gdifullname(), faceName) != face.gdifullname().end();
 	}
 
-	void TryLoad(const wchar_t* query, const FontQueryResponse& response)
+	enum class QueryResolution
+	{
+		NoResult,
+		SystemFont,
+		IndexFont
+	};
+
+	QueryResolution TryLoad(const wchar_t* query, const FontQueryResponse& response, std::vector<std::wstring>& loadedPaths)
 	{
 		struct EnumInfo
 		{
@@ -500,6 +507,7 @@ namespace sfh
 		{
 			if (enumInfo.maskedFace[i])continue;
 			auto path = Utf8ToWideString(response.fonts()[i].path());
+			loadedPaths.emplace_back(path);
 			feedback.add_path(response.fonts()[i].path());
 			hasFeedback = true;
 
@@ -518,6 +526,16 @@ namespace sfh
 		{
 			SendFeedbackAsync(std::move(feedback));
 		}
+
+		if (!loadedPaths.empty())
+		{
+			return QueryResolution::IndexFont;
+		}
+		if (enumInfo.hasSystemMatch)
+		{
+			return QueryResolution::SystemFont;
+		}
+		return QueryResolution::NoResult;
 	}
 
 	void QueryAndLoad(const wchar_t* query)
@@ -536,29 +554,39 @@ namespace sfh
 				return;
 			auto response = QueryFont(query);
 
-			std::vector<std::wstring> paths;
-			for (int i = 0; i < response.fonts_size(); ++i)
-			{
-				auto& font = response.fonts()[i];
-				auto path = Utf8ToWideString(font.path());
-				paths.emplace_back(std::move(path));
-			}
 			QueryCache::GetInstance().AddToCache(query);
+			std::vector<std::wstring> loadedPaths;
+			const auto resolution = TryLoad(query, response, loadedPaths);
 			std::vector<const wchar_t*> logData;
-			for (auto& s : paths)
+			for (auto& s : loadedPaths)
 			{
 				logData.push_back(s.c_str());
 			}
-			if (logData.empty())
-			{
-				EventLog::GetInstance().LogDllQueryNoResult(GetCurrentProcessId(), GetCurrentThreadId(), query);
-			}
-			else
-			{
-				EventLog::GetInstance().LogDllQuerySuccess(GetCurrentProcessId(), GetCurrentThreadId(), query, logData);
-			}
 
-			TryLoad(query, response);
+			switch (resolution)
+			{
+			case QueryResolution::IndexFont:
+				EventLog::GetInstance().LogDllQuerySuccess(
+					GetCurrentProcessId(),
+					GetCurrentThreadId(),
+					query,
+					L"index",
+					logData);
+				break;
+			case QueryResolution::SystemFont:
+				EventLog::GetInstance().LogDllQuerySuccess(
+					GetCurrentProcessId(),
+					GetCurrentThreadId(),
+					query,
+					L"system",
+					logData);
+				break;
+			case QueryResolution::NoResult:
+				EventLog::GetInstance().LogDllQueryNoResult(GetCurrentProcessId(), GetCurrentThreadId(), query);
+				break;
+			default:
+				MarkUnreachable();
+			}
 		}
 		catch (std::exception& e)
 		{

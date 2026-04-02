@@ -26,7 +26,7 @@ namespace sfh
 
 		void LogDllAttach(uint32_t processId);
 		void LogDllQuerySuccess(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
-			const std::vector<const wchar_t*> responsePaths);
+			const wchar_t* matchSource, const std::vector<const wchar_t*> responsePaths);
 		void LogDllQueryFailure(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
 			const wchar_t* reason);
 

@@ -26,10 +26,10 @@
 
 运行前需要安装 [Visual C++ 运行时](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
-### enableAutoStart.ps1
+### enableAutoStart.bat
 在当前用户的开始菜单-启动目录下创建快捷方式，以实现自动启动。
 
-### disableAutoStart.ps1
+### disableAutoStart.bat
 删除上面创建的快捷方式，以禁用自动启动。
 
 ### SubtitleFontHelper.toml

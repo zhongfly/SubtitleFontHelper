@@ -460,6 +460,7 @@ namespace sfh
 
 		wil::unique_hdc_window hDC = wil::GetWindowDC(HWND_DESKTOP);
 		LOGFONTW lf{};
+		lf.lfCharSet = DEFAULT_CHARSET;
 		if (query && wcsnlen(query, LF_FACESIZE) < LF_FACESIZE)
 		{
 			wcscpy_s(lf.lfFaceName, LF_FACESIZE, query);

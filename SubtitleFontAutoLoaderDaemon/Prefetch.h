@@ -17,7 +17,8 @@ namespace sfh
 			size_t prefetchCount,
 			const std::wstring& lruPath,
 			bool missingFontNotificationsEnabled,
-			std::vector<std::wstring> missingFontNotificationIgnoreQueries);
+			std::vector<std::wstring> missingFontIgnore,
+			std::vector<ConfigFile::ProcessMissingFontIgnoreElement> processMissingFontIgnore);
 		~Prefetch();
 
 		Prefetch(const Prefetch&) = delete;

@@ -22,12 +22,21 @@ namespace sfh
 			std::wstring m_name;
 		};
 
+		struct ProcessMissingFontIgnoreElement
+		{
+			// content
+			std::vector<std::wstring> m_regex;
+			std::vector<std::wstring> m_processes;
+			std::wstring m_flags;
+		};
+
 		uint32_t wmiPollInterval = 500;
 		uint32_t lruSize = 100;
 		bool managedIndexNotifications = false;
 		bool managedIndexFailureNotifications = true;
 		bool missingFontNotifications = false;
-		std::vector<std::wstring> missingFontNotificationIgnoreQueries;
+		std::vector<std::wstring> missingFontIgnore;
+		std::vector<ProcessMissingFontIgnoreElement> processMissingFontIgnore;
 
 		// content
 		std::vector<IndexFileElement> m_indexFile;

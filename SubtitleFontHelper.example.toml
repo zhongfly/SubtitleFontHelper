@@ -9,7 +9,16 @@ monitor_processes = [
 # managed_index_notifications = true
 # managed_index_failure_notifications = true
 # missing_font_notifications = true
-# missing_font_notification_ignore_queries = ['Some Missing Font']
+# missing_font_ignore = ['Some Missing Font', 'i:.*arial.*']
+#
+# [[notifications.process_missing_font_ignore]]
+# regex = ['Some Missing Font', '[A-Z0-9]{8}']
+# processes = ['mpc-hc64_nvo.exe', 'mpc-hc_nvo.exe']
+#
+# [[notifications.process_missing_font_ignore]]
+# regex = '.*arial.*'
+# processes = ['mpc-hc64_nvo.exe']
+# flags = 'i'
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'

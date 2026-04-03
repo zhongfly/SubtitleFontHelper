@@ -48,7 +48,16 @@ monitor_processes = [
 # managed_index_notifications = true
 # managed_index_failure_notifications = true
 # missing_font_notifications = true
-# missing_font_notification_ignore_queries = ['Some Missing Font']
+# missing_font_ignore = ['Some Missing Font', 'i:.*arial.*']
+#
+# [[notifications.process_missing_font_ignore]]
+# regex = ['Some Missing Font', '[A-Z0-9]{8}']
+# processes = ['mpc-hc64_nvo.exe', 'mpc-hc_nvo.exe']
+#
+# [[notifications.process_missing_font_ignore]]
+# regex = '.*arial.*'
+# processes = ['mpc-hc64_nvo.exe']
+# flags = 'i'
 
 [[index_files]]
 path = 'indexes/FontIndex.xml'
@@ -72,7 +81,8 @@ source_folders = [
  - `[notifications].managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
  - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认开启。
  - `[notifications].missing_font_notifications` 控制字体缺失通知。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
- - `[notifications].missing_font_notification_ignore_queries` 是一个字符串列表。启用字体缺失通知后，如果某个字体缺失并且名称精确命中这个列表，就不发送相应的字体缺失通知。
+ - `[notifications].missing_font_ignore` 是一个正则字符串列表。启用字体缺失通知后，如果某个字体缺失名称被任一规则整串匹配，就不发送相应的字体缺失通知。默认区分大小写；例如 `Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配；单条规则可用 `i:` 前缀启用忽略大小写，例如 `i:.*arial.*`。
+ - `[[notifications.process_missing_font_ignore]]` 用于设置按进程名生效的缺失字体忽略规则。`regex` 支持单个正则字符串或字符串列表，并统一使用整串匹配；例如 `Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配，`['Some Missing Font', '[A-Z0-9]{8}']` 表示同一组进程共享多条规则。`processes` 为一个或多个进程 `exe` 文件名，`flags = 'i'` 表示该条规则忽略大小写，可省略。
  - 每一节 `[[index_files]]` 都表示一个字体索引文件的配置：其中 `path` 用来设置字体索引文件的保存位置和名称； `source_folders` 表示字体索引文件所覆盖的字体文件来源，在字体索引文件已经存在时，可省略，省略后将不再监视其中的字体文件变化。
  - TOML 里的 `[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。
  - 字体索引文件中 的 `FontFace/@path` 会在可行时写成相对索引文件目录的路径；程序读取后会统一解析成绝对路径。

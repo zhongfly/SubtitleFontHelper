@@ -1,6 +1,8 @@
 #include "pch.h"
 
 #include <filesystem>
+#include <regex>
+#include <stdexcept>
 
 #include "Prefetch.h"
 #include "Common.h"
@@ -129,10 +131,23 @@ public:
 
 class sfh::Prefetch::Implementation : public sfh::IRpcFeedbackHandler
 {
+	struct CompiledRegexRule
+	{
+		std::wstring m_pattern;
+		std::wregex m_regex;
+	};
+
+	struct CompiledProcessRule
+	{
+		std::vector<CompiledRegexRule> m_regex;
+		std::vector<std::wstring> m_processes;
+	};
+
 	IDaemon* m_daemon;
 	SimpleLRU<std::wstring> m_lru;
 	bool m_missingFontNotificationsEnabled = true;
-	std::vector<std::wstring> m_missingFontNotificationIgnoreQueries;
+	std::vector<CompiledRegexRule> m_missingFontIgnore;
+	std::vector<CompiledProcessRule> m_processMissingFontIgnore;
 
 	std::wstring m_cachePath;
 
@@ -142,13 +157,15 @@ public:
 		size_t prefetchCount,
 		const std::wstring& lruPath,
 		bool missingFontNotificationsEnabled,
-		std::vector<std::wstring> missingFontNotificationIgnoreQueries)
+		std::vector<std::wstring> missingFontIgnore,
+		std::vector<ConfigFile::ProcessMissingFontIgnoreElement> processMissingFontIgnore)
 		: m_daemon(daemon),
 		  m_lru(prefetchCount),
 		  m_missingFontNotificationsEnabled(missingFontNotificationsEnabled),
-		  m_missingFontNotificationIgnoreQueries(std::move(missingFontNotificationIgnoreQueries)),
 		  m_cachePath(lruPath)
 	{
+		InitializeMissingFontIgnoreRules(std::move(missingFontIgnore));
+		InitializeProcessMissingFontIgnoreRules(std::move(processMissingFontIgnore));
 		LoadLruCache(m_cachePath);
 	}
 
@@ -166,6 +183,125 @@ public:
 	}
 
 private:
+	static bool HasIgnoreCaseFlag(const std::wstring& flags)
+	{
+		return flags.find(L'i') != std::wstring::npos;
+	}
+
+	static const std::wstring& NormalizeToBaseName(const std::wstring& processName, std::wstring& storage)
+	{
+		if (processName.empty())
+		{
+			storage.clear();
+			return storage;
+		}
+
+		storage = std::filesystem::path(processName).filename().wstring();
+		return storage;
+	}
+
+	static CompiledRegexRule CompileRegexRule(
+		const std::wstring& pattern,
+		bool ignoreCase,
+		const char* configName)
+	{
+		if (pattern.empty())
+			throw std::runtime_error(std::string(configName) + " must not be empty");
+
+		auto flags = std::regex_constants::ECMAScript | std::regex_constants::optimize;
+		if (ignoreCase)
+		{
+			flags |= std::regex_constants::icase;
+		}
+
+		try
+		{
+			return { pattern, std::wregex(pattern, flags) };
+		}
+		catch (const std::regex_error& e)
+		{
+			throw std::runtime_error(
+				std::string("invalid regex in ")
+				+ configName
+				+ ": "
+				+ e.what());
+		}
+	}
+
+	static bool IsCaseInsensitiveItem(const std::wstring& pattern, std::wstring& normalizedPattern)
+	{
+		if (pattern.rfind(L"i:", 0) == 0)
+		{
+			normalizedPattern = pattern.substr(2);
+			return true;
+		}
+
+		normalizedPattern = pattern;
+		return false;
+	}
+
+	void InitializeMissingFontIgnoreRules(std::vector<std::wstring>&& missingFontIgnore)
+	{
+		m_missingFontIgnore.reserve(missingFontIgnore.size());
+		for (auto& item : missingFontIgnore)
+		{
+			std::wstring pattern;
+			const bool ignoreCase = IsCaseInsensitiveItem(item, pattern);
+			m_missingFontIgnore.emplace_back(
+				CompileRegexRule(pattern, ignoreCase, "notifications.missing_font_ignore"));
+		}
+	}
+
+	void InitializeProcessMissingFontIgnoreRules(
+		std::vector<ConfigFile::ProcessMissingFontIgnoreElement>&& processMissingFontIgnore)
+	{
+		m_processMissingFontIgnore.reserve(processMissingFontIgnore.size());
+		for (auto& rule : processMissingFontIgnore)
+		{
+			CompiledProcessRule compiledRule;
+			compiledRule.m_processes = std::move(rule.m_processes);
+			compiledRule.m_regex.reserve(rule.m_regex.size());
+			for (const auto& regex : rule.m_regex)
+			{
+				compiledRule.m_regex.emplace_back(
+					CompileRegexRule(
+						regex,
+						HasIgnoreCaseFlag(rule.m_flags),
+						"notifications.process_missing_font_ignore.regex"));
+			}
+			m_processMissingFontIgnore.emplace_back(std::move(compiledRule));
+		}
+	}
+
+	static bool MatchesRegexRule(const CompiledRegexRule& rule, const std::wstring& missingQuery)
+	{
+		return std::regex_match(missingQuery, rule.m_regex);
+	}
+
+	static bool MatchesProcessName(
+		const std::vector<std::wstring>& processes,
+		const std::wstring& processName)
+	{
+		if (processName.empty())
+			return false;
+
+		std::wstring normalizedProcessName;
+		const auto& baseName = NormalizeToBaseName(processName, normalizedProcessName);
+		for (const auto& candidate : processes)
+		{
+			if (CompareStringOrdinal(
+				candidate.c_str(),
+				-1,
+				baseName.c_str(),
+				-1,
+				TRUE) == CSTR_EQUAL)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void LoadLruCache(const std::filesystem::path& path)
 	{
 		std::ifstream input(path);
@@ -195,20 +331,29 @@ private:
 	}
 
 public:
-	bool ShouldIgnoreMissingFontNotification(const std::wstring& missingQuery) const
+	bool ShouldIgnoreMissingFontNotification(
+		const std::wstring& missingQuery,
+		const std::wstring& processName) const
 	{
-		for (const auto& ignoredQuery : m_missingFontNotificationIgnoreQueries)
+		for (const auto& rule : m_missingFontIgnore)
 		{
-			if (CompareStringOrdinal(
-				ignoredQuery.c_str(),
-				-1,
-				missingQuery.c_str(),
-				-1,
-				TRUE) == CSTR_EQUAL)
+			if (MatchesRegexRule(rule, missingQuery))
 			{
 				return true;
 			}
 		}
+
+		for (const auto& rule : m_processMissingFontIgnore)
+		{
+			if (!MatchesProcessName(rule.m_processes, processName))
+				continue;
+			for (const auto& regex : rule.m_regex)
+			{
+				if (MatchesRegexRule(regex, missingQuery))
+					return true;
+			}
+		}
+
 		return false;
 	}
 
@@ -225,7 +370,12 @@ public:
 			try
 			{
 				const auto missingFamilyName = Utf8ToWideString(data.missingquery());
-				if (ShouldIgnoreMissingFontNotification(missingFamilyName))
+				std::wstring processName;
+				if (!data.processname().empty())
+				{
+					processName = Utf8ToWideString(data.processname());
+				}
+				if (ShouldIgnoreMissingFontNotification(missingFamilyName, processName))
 				{
 					return;
 				}
@@ -250,13 +400,15 @@ sfh::Prefetch::Prefetch(
 	size_t prefetchCount,
 	const std::wstring& lruPath,
 	bool missingFontNotificationsEnabled,
-	std::vector<std::wstring> missingFontNotificationIgnoreQueries)
+	std::vector<std::wstring> missingFontIgnore,
+	std::vector<ConfigFile::ProcessMissingFontIgnoreElement> processMissingFontIgnore)
 	: m_impl(std::make_unique<Implementation>(
 		daemon,
 		prefetchCount,
 		lruPath,
 		missingFontNotificationsEnabled,
-		std::move(missingFontNotificationIgnoreQueries)))
+		std::move(missingFontIgnore),
+		std::move(processMissingFontIgnore)))
 {
 }
 

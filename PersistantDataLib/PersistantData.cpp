@@ -186,6 +186,7 @@ namespace
 		{
 			Root = 0,
 			Notifications,
+			ProcessMissingFontIgnore,
 			IndexFile,
 			Unknown
 		};
@@ -224,6 +225,23 @@ namespace
 			{
 				if (indexFile.m_path.empty())
 					ThrowError("index_files.path must not be empty");
+			}
+			for (const auto& rule : m_config->processMissingFontIgnore)
+			{
+				if (rule.m_regex.empty())
+					ThrowError("notifications.process_missing_font_ignore.regex must not be empty");
+				for (const auto& regex : rule.m_regex)
+				{
+					if (regex.empty())
+						ThrowError("notifications.process_missing_font_ignore.regex must not contain empty item");
+				}
+				if (rule.m_processes.empty())
+					ThrowError("notifications.process_missing_font_ignore.processes must not be empty");
+				for (wchar_t ch : rule.m_flags)
+				{
+					if (ch != L'i')
+						ThrowError("notifications.process_missing_font_ignore.flags only supports 'i'");
+				}
 			}
 
 			return std::move(m_config);
@@ -431,6 +449,12 @@ namespace
 			{
 				m_config->m_indexFile.emplace_back();
 				m_context = Context::IndexFile;
+				return;
+			}
+			if (isArrayTable && tableName == "notifications.process_missing_font_ignore")
+			{
+				m_config->processMissingFontIgnore.emplace_back();
+				m_context = Context::ProcessMissingFontIgnore;
 				return;
 			}
 			if (!isArrayTable && tableName == "notifications")
@@ -683,6 +707,22 @@ namespace
 			return *arrayValue;
 		}
 
+		static std::vector<std::wstring> ExpectStringOrStringArray(const TomlValue& value, const char* keyName)
+		{
+			if (const auto stringValue = std::get_if<std::wstring>(&value))
+			{
+				return { *stringValue };
+			}
+
+			if (const auto arrayValue = std::get_if<std::vector<std::wstring>>(&value))
+			{
+				return *arrayValue;
+			}
+
+			throw std::runtime_error(
+				std::string("TOML key requires string or string array value: ") + keyName);
+		}
+
 		void ApplyRootKey(const std::string& key, const TomlValue& value)
 		{
 			if (key == "wmi_poll_interval")
@@ -723,9 +763,37 @@ namespace
 			{
 				m_config->missingFontNotifications = ExpectBool(value, key.c_str());
 			}
+			else if (key == "missing_font_ignore")
+			{
+				m_config->missingFontIgnore = ExpectStringArray(value, key.c_str());
+			}
 			else if (key == "missing_font_notification_ignore_queries")
 			{
-				m_config->missingFontNotificationIgnoreQueries = ExpectStringArray(value, key.c_str());
+				ThrowError("missing_font_notification_ignore_queries was renamed to missing_font_ignore");
+			}
+		}
+
+		void ApplyProcessMissingFontIgnoreKey(const std::string& key, const TomlValue& value)
+		{
+			if (m_config->processMissingFontIgnore.empty())
+				ThrowError("notifications.process_missing_font_ignore table is not initialized");
+
+			auto& rule = m_config->processMissingFontIgnore.back();
+			if (key == "regex")
+			{
+				rule.m_regex = ExpectStringOrStringArray(value, key.c_str());
+			}
+			else if (key == "query_regex")
+			{
+				rule.m_regex = ExpectStringOrStringArray(value, key.c_str());
+			}
+			else if (key == "processes")
+			{
+				rule.m_processes = ExpectStringArray(value, key.c_str());
+			}
+			else if (key == "flags")
+			{
+				rule.m_flags = ExpectString(value, key.c_str());
 			}
 		}
 
@@ -760,6 +828,9 @@ namespace
 				break;
 			case Context::Notifications:
 				ApplyNotificationsKey(key, value);
+				break;
+			case Context::ProcessMissingFontIgnore:
+				ApplyProcessMissingFontIgnoreKey(key, value);
 				break;
 			case Context::IndexFile:
 				ApplyIndexFileKey(key, value);

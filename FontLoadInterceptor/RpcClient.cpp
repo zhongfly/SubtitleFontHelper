@@ -9,8 +9,10 @@
 #include <sddl.h>
 #include <unordered_set>
 #include <sstream>
+#include <filesystem>
 
 #include <wil/resource.h>
+#include <wil/win32_helpers.h>
 
 #undef max
 
@@ -357,6 +359,13 @@ namespace sfh
 		}
 	};
 
+	std::wstring GetCurrentProcessBaseName()
+	{
+		auto path = wil::GetModuleFileNameW<wil::unique_hlocal_string>();
+		std::filesystem::path processPath(path.get());
+		return processPath.filename().wstring();
+	}
+
 	void SendRequst(wil::unique_hfile& pipe, const FontQueryRequest& request)
 	{
 		std::ostringstream oss;
@@ -519,6 +528,7 @@ namespace sfh
 		if (response.fonts_size() == 0 && !enumInfo.hasSystemMatch && query != nullptr && *query != L'\0')
 		{
 			feedback.set_missingquery(WideToUtf8String(query));
+			feedback.set_processname(WideToUtf8String(GetCurrentProcessBaseName()));
 			hasFeedback = true;
 		}
 

@@ -333,6 +333,46 @@ namespace sfh
 			{
 			}
 		}
+
+		void TryShowReloadFailureNotification(const char* message)
+		{
+			try
+			{
+				std::wstring details;
+				if (message != nullptr && *message != '\0')
+				{
+					try
+					{
+						details = Utf8ToWideString(message);
+					}
+					catch (...)
+					{
+					}
+				}
+
+				std::wstring toastMessage = L"配置重载失败";
+				if (!details.empty())
+				{
+					toastMessage += L"：" + details;
+				}
+				ToastNotifier().ShowToastAsync(L"Subtitle Font Helper", std::move(toastMessage));
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryShowReloadFailureNotification()
+		{
+			try
+			{
+				ToastNotifier().ShowToastAsync(L"Subtitle Font Helper", L"配置重载失败");
+			}
+			catch (...)
+			{
+			}
+		}
+
 		void NotifyException(std::exception_ptr exception) override
 		{
 			EnqueueMessage({ MessageType::Exception, std::move(exception), 0 });
@@ -531,6 +571,7 @@ namespace sfh
 				if (!hadService)
 					throw;
 				TryLogReloadFailure(e.what());
+				TryShowReloadFailureNotification(e.what());
 				return;
 			}
 			catch (...)
@@ -538,6 +579,7 @@ namespace sfh
 				if (!hadService)
 					throw;
 				TryLogReloadFailure();
+				TryShowReloadFailureNotification();
 				return;
 			}
 		}

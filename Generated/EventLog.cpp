@@ -361,16 +361,17 @@ sfh::EventLog& sfh::EventLog::GetInstance()
 
 void sfh::EventLog::LogDllAttach(uint32_t processId)
 {
-	WriteEventLogLine(L"INFO", L"dll", L"DllAttach processId=" + std::to_wstring(processId));
+	(void)processId;
+	WriteEventLogLine(L"INFO", L"dll", L"DllAttach");
 }
 
 void sfh::EventLog::LogDllQuerySuccess(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
 	const wchar_t* matchSource, const std::vector<const wchar_t*> responsePaths)
 {
 	std::wostringstream oss;
-	oss << L"QuerySuccess processId=" << processId
-		<< L" threadId=" << threadId
-		<< L" request=\"" << (requestName ? requestName : L"NULL") << L"\""
+	(void)processId;
+	(void)threadId;
+	oss << L"QuerySuccess request=\"" << (requestName ? requestName : L"NULL") << L"\""
 		<< L" source=\"" << (matchSource ? matchSource : L"unknown") << L"\""
 		<< L" paths=[" << JoinResponsePaths(responsePaths) << L"]";
 	WriteEventLogLine(L"INFO", L"dll", oss.str());
@@ -380,9 +381,9 @@ void sfh::EventLog::LogDllQueryFailure(uint32_t processId, uint32_t threadId, co
 	const wchar_t* reason)
 {
 	std::wostringstream oss;
-	oss << L"QueryFailure processId=" << processId
-		<< L" threadId=" << threadId
-		<< L" request=\"" << (requestName ? requestName : L"NULL") << L"\""
+	(void)processId;
+	(void)threadId;
+	oss << L"QueryFailure request=\"" << (requestName ? requestName : L"NULL") << L"\""
 		<< L" reason=\"" << (reason ? reason : L"NULL") << L"\"";
 	WriteEventLogLine(L"ERROR", L"dll", oss.str());
 }
@@ -421,18 +422,18 @@ void sfh::EventLog::LogDllInjectProcessFailure(uint32_t processId, const wchar_t
 void sfh::EventLog::LogDllQueryNoResult(uint32_t processId, uint32_t threadId, const wchar_t* requestName)
 {
 	std::wostringstream oss;
-	oss << L"QueryNoResult processId=" << processId
-		<< L" threadId=" << threadId
-		<< L" request=\"" << (requestName ? requestName : L"NULL") << L"\"";
+	(void)processId;
+	(void)threadId;
+	oss << L"QueryNoResult request=\"" << (requestName ? requestName : L"NULL") << L"\"";
 	WriteEventLogLine(L"INFO", L"dll", oss.str());
 }
 
 void sfh::EventLog::LogDllLoadFont(uint32_t processId, uint32_t threadId, const wchar_t* path)
 {
 	std::wostringstream oss;
-	oss << L"LoadFont processId=" << processId
-		<< L" threadId=" << threadId
-		<< L" path=\"" << (path ? path : L"NULL") << L"\"";
+	(void)processId;
+	(void)threadId;
+	oss << L"LoadFont path=\"" << (path ? path : L"NULL") << L"\"";
 	WriteEventLogLine(L"INFO", L"dll", oss.str());
 }
 

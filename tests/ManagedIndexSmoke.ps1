@@ -446,7 +446,7 @@ try {
 		throw "rundll32 injection helper exited with code $($injectorProcess.ExitCode).`n$(Get-LogTail -LogPath $phase4LogPath)"
 	}
 
-	$attachPattern = [regex]("DllAttach processId=$clientPid")
+	$attachPattern = [regex]("\[pid=$clientPid:tid=\d+\] DllAttach$")
 	$injectSuccessPattern = [regex]("InjectProcessSuccess processId=$clientPid")
 	$injectFailurePattern = [regex]("InjectProcessFailure processId=$clientPid")
 

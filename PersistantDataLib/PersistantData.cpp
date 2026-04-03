@@ -11,6 +11,7 @@
 #include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 
 #include <Windows.h>
@@ -49,7 +50,7 @@ namespace
 			&& wcsncmp(actual, expected, actualLength) == 0;
 	}
 
-	std::string ReadUtf8TextFile(const std::wstring& path)
+	std::string ReadTextFileBytes(const std::wstring& path)
 	{
 		std::string ret;
 		wil::unique_file fp;
@@ -64,6 +65,12 @@ namespace
 		rewind(fp.get());
 		if (!ret.empty() && fread(ret.data(), sizeof(char), ret.size(), fp.get()) != ret.size())
 			throw std::runtime_error("unable to read file");
+		return ret;
+	}
+
+	std::string ReadUtf8TextFile(const std::wstring& path)
+	{
+		auto ret = ReadTextFileBytes(path);
 		if (ret.size() >= 3
 			&& static_cast<unsigned char>(ret[0]) == 0xEF
 			&& static_cast<unsigned char>(ret[1]) == 0xBB
@@ -72,6 +79,102 @@ namespace
 			ret.erase(0, 3);
 		}
 		return ret;
+	}
+
+	void WriteUtf8TextFile(const std::wstring& path, const std::string_view content, bool withBom)
+	{
+		wil::unique_file fp;
+		if (_wfopen_s(fp.put(), path.c_str(), L"wb"))
+			throw std::runtime_error("unable to open file");
+
+		if (withBom)
+		{
+			static constexpr unsigned char UTF8_BOM[] = { 0xEF, 0xBB, 0xBF };
+			if (fwrite(UTF8_BOM, sizeof(unsigned char), std::size(UTF8_BOM), fp.get()) != std::size(UTF8_BOM))
+				throw std::runtime_error("unable to write file");
+		}
+
+		if (!content.empty()
+			&& fwrite(content.data(), sizeof(char), content.size(), fp.get()) != content.size())
+		{
+			throw std::runtime_error("unable to write file");
+		}
+	}
+
+	bool StartsWithUtf8Bom(const std::string_view content)
+	{
+		return content.size() >= 3
+			&& static_cast<unsigned char>(content[0]) == 0xEF
+			&& static_cast<unsigned char>(content[1]) == 0xBB
+			&& static_cast<unsigned char>(content[2]) == 0xBF;
+	}
+
+	bool ReplaceLegacyMissingFontIgnoreKeyInPlace(std::string& text)
+	{
+		static constexpr std::string_view OLD_KEY = "missing_font_notification_ignore_queries";
+		static constexpr std::string_view NEW_KEY = "missing_font_ignore";
+		bool replaced = false;
+		size_t lineStart = 0;
+		while (lineStart < text.size())
+		{
+			size_t lineEnd = text.find_first_of("\r\n", lineStart);
+			if (lineEnd == std::string::npos)
+			{
+				lineEnd = text.size();
+			}
+
+			size_t keyStart = lineStart;
+			while (keyStart < lineEnd && (text[keyStart] == ' ' || text[keyStart] == '\t'))
+			{
+				++keyStart;
+			}
+
+			if (keyStart < lineEnd
+				&& text[keyStart] != '#'
+				&& keyStart + OLD_KEY.size() <= lineEnd
+				&& std::string_view(text.data() + keyStart, OLD_KEY.size()) == OLD_KEY)
+			{
+				size_t separator = keyStart + OLD_KEY.size();
+				while (separator < lineEnd && (text[separator] == ' ' || text[separator] == '\t'))
+				{
+					++separator;
+				}
+				if (separator < lineEnd && text[separator] == '=')
+				{
+					text.replace(keyStart, OLD_KEY.size(), NEW_KEY);
+					lineEnd = lineEnd - OLD_KEY.size() + NEW_KEY.size();
+					replaced = true;
+				}
+			}
+
+			lineStart = lineEnd;
+			while (lineStart < text.size() && (text[lineStart] == '\r' || text[lineStart] == '\n'))
+			{
+				++lineStart;
+			}
+		}
+		return replaced;
+	}
+
+	bool TryMigrateLegacyMissingFontIgnoreKey(const std::wstring& path)
+	{
+		auto content = ReadTextFileBytes(path);
+
+		const bool hadBom = StartsWithUtf8Bom(content);
+		std::string_view normalizedContent(content);
+		if (hadBom)
+		{
+			normalizedContent.remove_prefix(3);
+		}
+
+		std::string migratedContent(normalizedContent);
+		if (!ReplaceLegacyMissingFontIgnoreKeyInPlace(migratedContent))
+		{
+			return false;
+		}
+
+		WriteUtf8TextFile(path, migratedContent, hadBom);
+		return true;
 	}
 
 	std::wstring Utf8ToWideString(const std::string_view str)
@@ -197,6 +300,7 @@ namespace
 		size_t m_column = 1;
 		Context m_context = Context::Root;
 		std::unique_ptr<sfh::ConfigFile> m_config = std::make_unique<sfh::ConfigFile>();
+		bool m_usedLegacyMissingFontIgnoreKey = false;
 
 	public:
 		explicit TomlConfigParser(std::string_view source)
@@ -245,6 +349,11 @@ namespace
 			}
 
 			return std::move(m_config);
+		}
+
+		bool UsedLegacyMissingFontIgnoreKey() const
+		{
+			return m_usedLegacyMissingFontIgnoreKey;
 		}
 
 	private:
@@ -769,7 +878,8 @@ namespace
 			}
 			else if (key == "missing_font_notification_ignore_queries")
 			{
-				ThrowError("missing_font_notification_ignore_queries was renamed to missing_font_ignore");
+				m_config->missingFontIgnore = ExpectStringArray(value, key.c_str());
+				m_usedLegacyMissingFontIgnoreKey = true;
 			}
 		}
 
@@ -843,11 +953,12 @@ namespace
 		}
 	};
 
-	std::unique_ptr<sfh::ConfigFile> ReadTomlConfigFromFile(const std::wstring& path)
+	std::pair<std::unique_ptr<sfh::ConfigFile>, bool> ReadTomlConfigFromFile(const std::wstring& path)
 	{
 		auto content = ReadUtf8TextFile(path);
 		TomlConfigParser parser(content);
-		return parser.Parse();
+		auto config = parser.Parse();
+		return std::make_pair(std::move(config), parser.UsedLegacyMissingFontIgnoreKey());
 	}
 
 	class SimpleSAXContentHandler : public ISAXContentHandler
@@ -1235,9 +1346,19 @@ std::unique_ptr<sfh::ConfigFile> sfh::ConfigFile::ReadFromFile(const std::wstrin
 			"SubtitleFontHelper.toml not found. XML configuration is no longer supported; please migrate to TOML.");
 	}
 
-	auto config = ReadTomlConfigFromFile(path);
+	auto [config, usedLegacyMissingFontIgnoreKey] = ReadTomlConfigFromFile(path);
 	ResolveTomlConfigPaths(*config, path);
-	return config;
+	if (usedLegacyMissingFontIgnoreKey)
+	{
+		try
+		{
+			TryMigrateLegacyMissingFontIgnoreKey(path);
+		}
+		catch (...)
+		{
+		}
+	}
+	return std::move(config);
 }
 
 std::unique_ptr<sfh::FontDatabase> sfh::FontDatabase::ReadFromFile(const std::wstring& path)

@@ -214,7 +214,11 @@
     <ClCompile Include="QueryService.cpp" />
     <ClCompile Include="RpcServer.cpp" />
     <ClCompile Include="ToastNotifier.cpp" />
-    <ClCompile Include="TrayIcon.cpp" />
+    <ClCompile Include="TrayIcon_Core.cpp" />
+    <ClCompile Include="TrayIcon_Theme.cpp" />
+    <ClCompile Include="TrayIcon_FontsWindow.cpp" />
+    <ClCompile Include="TrayIcon_LogsWindow.cpp" />
+    <ClCompile Include="TrayIcon_ToolWindowProc.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\SharedIncludes\FontQuery.proto">
@@ -256,6 +260,7 @@
     <ClInclude Include="RpcServer.h" />
     <ClInclude Include="ToastNotifier.h" />
     <ClInclude Include="TrayUiData.h" />
+    <ClInclude Include="TrayIconImpl.h" />
     <ClInclude Include="TrayIcon.h" />
   </ItemGroup>
   <ItemGroup>

@@ -386,7 +386,7 @@ private:
 		createParams.m_text = text;
 
 		handle = CreateWindowExW(
-			WS_EX_TOOLWINDOW,
+			WS_EX_APPWINDOW,
 			TOOL_WINDOW_CLASS_NAME,
 			title,
 			WS_OVERLAPPEDWINDOW | WS_VISIBLE,
@@ -394,7 +394,7 @@ private:
 			CW_USEDEFAULT,
 			720,
 			360,
-			m_hWnd,
+			nullptr,
 			nullptr,
 			wil::GetModuleInstanceHandle(),
 			&createParams);

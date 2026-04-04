@@ -87,6 +87,7 @@ private:
 	HFONT m_toolWindowFont = nullptr;
 	HFONT m_toolWindowTitleFont = nullptr;
 	HFONT m_toolWindowSectionFont = nullptr;
+	UINT m_toolWindowFontDpi = 0;
 	HBRUSH m_windowBackgroundBrush = nullptr;
 	HBRUSH m_panelBackgroundBrush = nullptr;
 	HBRUSH m_metadataBackgroundBrush = nullptr;
@@ -126,6 +127,21 @@ public:
 	void NotifyFontUiDataChanged();
 
 private:
+	// DPI helpers
+	static int ScaleDpi(int baseValue, UINT dpi)
+	{
+		return MulDiv(baseValue, static_cast<int>(dpi), 96);
+	}
+
+	static UINT GetWindowDpi(HWND hWnd)
+	{
+		UINT dpi = GetDpiForWindow(hWnd);
+		return dpi != 0 ? dpi : 96;
+	}
+
+	void InvalidateFontCache();
+	void EnsureFontCacheForDpi(UINT dpi);
+
 	// Core (tray icon, message loop)
 	bool IsLoading() const;
 	std::wstring BuildLoadingTooltip() const;

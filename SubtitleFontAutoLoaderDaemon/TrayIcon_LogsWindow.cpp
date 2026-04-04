@@ -3,6 +3,9 @@
 
 void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 {
+	const UINT dpi = GetWindowDpi(hWnd);
+	EnsureFontCacheForDpi(dpi);
+
 	m_logsTitleLabel = CreateWindowExW(
 		0,
 		L"STATIC",
@@ -161,31 +164,32 @@ void sfh::SystemTray::Implementation::LayoutLogsWindowControls(int clientWidth, 
 		return;
 	}
 
-	const int left = 16;
-	const int right = 16;
-	const int top = 16;
-	const int availableWidth = (std::max)(320, clientWidth - left - right);
-	const int titleHeight = 28;
-	const int subtitleHeight = 20;
+	const UINT dpi = GetWindowDpi(m_logsWindow != nullptr ? m_logsWindow : m_logsTitleLabel);
+	const int left = ScaleDpi(16, dpi);
+	const int right = ScaleDpi(16, dpi);
+	const int top = ScaleDpi(16, dpi);
+	const int availableWidth = (std::max)(ScaleDpi(320, dpi), clientWidth - left - right);
+	const int titleHeight = ScaleDpi(28, dpi);
+	const int subtitleHeight = ScaleDpi(20, dpi);
 	const int statusHeight = CalculateLogsStatusHeight(availableWidth);
-	const bool inlineButton = availableWidth >= 500;
-	const int buttonWidth = 120;
-	const int buttonHeight = 28;
-	const int contentSectionTop = top + titleHeight + 10 + subtitleHeight + 14 + statusHeight + 18;
+	const bool inlineButton = availableWidth >= ScaleDpi(500, dpi);
+	const int buttonWidth = ScaleDpi(120, dpi);
+	const int buttonHeight = ScaleDpi(28, dpi);
+	const int contentSectionTop = top + titleHeight + ScaleDpi(10, dpi) + subtitleHeight + ScaleDpi(14, dpi) + statusHeight + ScaleDpi(18, dpi);
 	const int labelWidth = inlineButton
-		? (std::max)(120, availableWidth - buttonWidth - 16)
+		? (std::max)(ScaleDpi(120, dpi), availableWidth - buttonWidth - ScaleDpi(16, dpi))
 		: availableWidth;
 	const int buttonLeft = inlineButton
 		? (std::max)(left, left + availableWidth - buttonWidth)
 		: left;
-	const int buttonTop = inlineButton ? contentSectionTop - 4 : contentSectionTop + 24;
-	const int logTop = inlineButton ? contentSectionTop + 32 : buttonTop + buttonHeight + 12;
-	const int logHeight = (std::max)(120, clientHeight - logTop - 16);
+	const int buttonTop = inlineButton ? contentSectionTop - ScaleDpi(4, dpi) : contentSectionTop + ScaleDpi(24, dpi);
+	const int logTop = inlineButton ? contentSectionTop + ScaleDpi(32, dpi) : buttonTop + buttonHeight + ScaleDpi(12, dpi);
+	const int logHeight = (std::max)(ScaleDpi(120, dpi), clientHeight - logTop - left);
 
 	MoveWindow(m_logsTitleLabel, left, top, availableWidth, titleHeight, TRUE);
-	MoveWindow(m_logsSubtitleLabel, left, top + titleHeight + 10, availableWidth, subtitleHeight, TRUE);
-	MoveWindow(m_logsStatusLabel, left, top + titleHeight + 10 + subtitleHeight + 14, availableWidth, statusHeight, TRUE);
-	MoveWindow(m_logsContentSectionLabel, left, contentSectionTop, labelWidth, 20, TRUE);
+	MoveWindow(m_logsSubtitleLabel, left, top + titleHeight + ScaleDpi(10, dpi), availableWidth, subtitleHeight, TRUE);
+	MoveWindow(m_logsStatusLabel, left, top + titleHeight + ScaleDpi(10, dpi) + subtitleHeight + ScaleDpi(14, dpi), availableWidth, statusHeight, TRUE);
+	MoveWindow(m_logsContentSectionLabel, left, contentSectionTop, labelWidth, ScaleDpi(20, dpi), TRUE);
 	MoveWindow(m_logsScrollBottomButton, buttonLeft, buttonTop, buttonWidth, buttonHeight, TRUE);
 	MoveWindow(m_logsEdit, left, logTop, availableWidth, logHeight, TRUE);
 }

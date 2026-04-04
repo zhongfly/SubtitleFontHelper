@@ -39,8 +39,11 @@ void sfh::SystemTray::Implementation::ShowToolWindow(HWND& handle, ToolWindowKin
 	createParams.m_owner = this;
 	createParams.m_kind = kind;
 	createParams.m_text = text;
-	const int initialWidth = kind == ToolWindowKind::Fonts ? 980 : 920;
-	const int initialHeight = kind == ToolWindowKind::Fonts ? 820 : 720;
+
+	// Use primary monitor DPI for initial sizing (window doesn't exist yet)
+	const UINT dpi = GetDpiForSystem();
+	const int initialWidth = ScaleDpi(kind == ToolWindowKind::Fonts ? 980 : 920, dpi);
+	const int initialHeight = ScaleDpi(kind == ToolWindowKind::Fonts ? 820 : 720, dpi);
 
 	handle = CreateWindowExW(
 		WS_EX_APPWINDOW,
@@ -120,6 +123,9 @@ HWND sfh::SystemTray::Implementation::CreateFontsListView(HWND parent, int contr
 
 void sfh::SystemTray::Implementation::SetupFontsWindowControls(HWND hWnd)
 {
+	const UINT dpi = GetWindowDpi(hWnd);
+	EnsureFontCacheForDpi(dpi);
+
 	m_fontsTitleLabel = CreateWindowExW(
 		0,
 		L"STATIC",
@@ -260,27 +266,35 @@ void sfh::SystemTray::Implementation::LayoutFontsWindowControls(int clientWidth,
 		return;
 	}
 
-	const int left = 16;
-	const int right = 16;
-	const int top = 16;
-	const int availableWidth = (std::max)(320, clientWidth - left - right);
-	const int titleHeight = 28;
-	const int statusHeight = 20;
-	const int sectionHeight = 20;
-	const int indexTop = top + titleHeight + 12 + statusHeight + 16 + sectionHeight + 8;
-	const int indexHeight = (std::min)(148, (std::max)(118, clientHeight / 4));
-	const int searchSectionTop = indexTop + indexHeight + 18;
-	const int searchEditTop = searchSectionTop + sectionHeight + 8;
-	const int resultTop = searchEditTop + 66;
-	const int resultHeight = (std::max)(180, clientHeight - resultTop - 16);
+	const UINT dpi = GetWindowDpi(m_fontsWindow != nullptr ? m_fontsWindow : m_fontsTitleLabel);
+	const int left = ScaleDpi(16, dpi);
+	const int right = ScaleDpi(16, dpi);
+	const int top = ScaleDpi(16, dpi);
+	const int availableWidth = (std::max)(ScaleDpi(320, dpi), clientWidth - left - right);
+	const int titleHeight = ScaleDpi(28, dpi);
+	const int statusHeight = ScaleDpi(20, dpi);
+	const int sectionHeight = ScaleDpi(20, dpi);
+	const int gap12 = ScaleDpi(12, dpi);
+	const int gap16 = ScaleDpi(16, dpi);
+	const int gap8 = ScaleDpi(8, dpi);
+	const int gap18 = ScaleDpi(18, dpi);
+	const int editHeight = ScaleDpi(30, dpi);
+	const int gap38 = ScaleDpi(38, dpi);
+	const int summaryHeight = ScaleDpi(20, dpi);
+	const int indexTop = top + titleHeight + gap12 + statusHeight + gap16 + sectionHeight + gap8;
+	const int indexHeight = (std::min)(ScaleDpi(148, dpi), (std::max)(ScaleDpi(118, dpi), clientHeight / 4));
+	const int searchSectionTop = indexTop + indexHeight + gap18;
+	const int searchEditTop = searchSectionTop + sectionHeight + gap8;
+	const int resultTop = searchEditTop + editHeight + gap8 + summaryHeight + gap8;
+	const int resultHeight = (std::max)(ScaleDpi(180, dpi), clientHeight - resultTop - left);
 
 	MoveWindow(m_fontsTitleLabel, left, top, availableWidth, titleHeight, TRUE);
-	MoveWindow(m_fontsStatusLabel, left, top + titleHeight + 12, availableWidth, statusHeight, TRUE);
-	MoveWindow(m_fontsIndexesSectionLabel, left, top + titleHeight + 12 + statusHeight + 16, availableWidth, sectionHeight, TRUE);
+	MoveWindow(m_fontsStatusLabel, left, top + titleHeight + gap12, availableWidth, statusHeight, TRUE);
+	MoveWindow(m_fontsIndexesSectionLabel, left, top + titleHeight + gap12 + statusHeight + gap16, availableWidth, sectionHeight, TRUE);
 	MoveWindow(m_fontsIndexListView, left, indexTop, availableWidth, indexHeight, TRUE);
 	MoveWindow(m_fontsSearchSectionLabel, left, searchSectionTop, availableWidth, sectionHeight, TRUE);
-	MoveWindow(m_fontsSearchEdit, left, searchEditTop, availableWidth, 30, TRUE);
-	MoveWindow(m_fontsSearchSummaryLabel, left, searchEditTop + 38, availableWidth, 20, TRUE);
+	MoveWindow(m_fontsSearchEdit, left, searchEditTop, availableWidth, editHeight, TRUE);
+	MoveWindow(m_fontsSearchSummaryLabel, left, searchEditTop + gap38, availableWidth, summaryHeight, TRUE);
 	MoveWindow(m_fontsResultListView, left, resultTop, availableWidth, resultHeight, TRUE);
 
 	ListView_SetColumnWidth(m_fontsIndexListView, 0, (std::max)(180, availableWidth * 35 / 100));

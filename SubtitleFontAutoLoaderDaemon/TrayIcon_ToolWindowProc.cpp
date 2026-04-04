@@ -60,6 +60,44 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			return 0;
 		}
 		break;
+	case WM_DPICHANGED:
+	{
+		const UINT newDpi = HIWORD(wParam);
+		InvalidateFontCache();
+		EnsureFontCacheForDpi(newDpi);
+		const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+		SetWindowPos(hWnd, nullptr,
+			suggestedRect->left, suggestedRect->top,
+			suggestedRect->right - suggestedRect->left,
+			suggestedRect->bottom - suggestedRect->top,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+		if (hWnd == m_fontsWindow)
+		{
+			// Re-apply fonts to all controls
+			ApplyToolWindowTitleFont(m_fontsTitleLabel);
+			ApplyToolWindowFont(m_fontsStatusLabel);
+			ApplyToolWindowSectionFont(m_fontsIndexesSectionLabel);
+			ApplyToolWindowSectionFont(m_fontsSearchSectionLabel);
+			ApplyToolWindowFont(m_fontsSearchEdit);
+			ApplyToolWindowFont(m_fontsSearchSummaryLabel);
+			ApplyToolWindowFont(m_fontsIndexListView);
+			ApplyToolWindowFont(m_fontsResultListView);
+			auto header = ListView_GetHeader(m_fontsIndexListView);
+			if (header) ApplyToolWindowFont(header);
+			header = ListView_GetHeader(m_fontsResultListView);
+			if (header) ApplyToolWindowFont(header);
+		}
+		else if (hWnd == m_logsWindow)
+		{
+			ApplyToolWindowTitleFont(m_logsTitleLabel);
+			ApplyToolWindowFont(m_logsSubtitleLabel);
+			ApplyToolWindowSectionFont(m_logsContentSectionLabel);
+			ApplyToolWindowFont(m_logsScrollBottomButton);
+			ApplyToolWindowFont(m_logsStatusLabel);
+			ApplyToolWindowFont(m_logsEdit);
+		}
+		return 0;
+	}
 	case WM_GETMINMAXINFO:
 	{
 		auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
@@ -68,16 +106,17 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			return 0;
 		}
 
+		const UINT dpi = GetWindowDpi(hWnd);
 		if (hWnd == m_fontsWindow)
 		{
-			minMaxInfo->ptMinTrackSize.x = 860;
-			minMaxInfo->ptMinTrackSize.y = 700;
+			minMaxInfo->ptMinTrackSize.x = ScaleDpi(860, dpi);
+			minMaxInfo->ptMinTrackSize.y = ScaleDpi(700, dpi);
 			return 0;
 		}
 		if (hWnd == m_logsWindow)
 		{
-			minMaxInfo->ptMinTrackSize.x = 760;
-			minMaxInfo->ptMinTrackSize.y = 560;
+			minMaxInfo->ptMinTrackSize.x = ScaleDpi(760, dpi);
+			minMaxInfo->ptMinTrackSize.y = ScaleDpi(560, dpi);
 			return 0;
 		}
 		break;

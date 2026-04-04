@@ -1,6 +1,36 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
 
+void sfh::SystemTray::Implementation::InvalidateFontCache()
+{
+	if (m_toolWindowFont != nullptr)
+	{
+		DeleteObject(m_toolWindowFont);
+		m_toolWindowFont = nullptr;
+	}
+	if (m_toolWindowTitleFont != nullptr)
+	{
+		DeleteObject(m_toolWindowTitleFont);
+		m_toolWindowTitleFont = nullptr;
+	}
+	if (m_toolWindowSectionFont != nullptr)
+	{
+		DeleteObject(m_toolWindowSectionFont);
+		m_toolWindowSectionFont = nullptr;
+	}
+	m_toolWindowFontDpi = 0;
+}
+
+void sfh::SystemTray::Implementation::EnsureFontCacheForDpi(UINT dpi)
+{
+	if (m_toolWindowFontDpi == dpi && m_toolWindowFont != nullptr)
+	{
+		return;
+	}
+	InvalidateFontCache();
+	m_toolWindowFontDpi = dpi;
+}
+
 void sfh::SystemTray::Implementation::ConfigureListViewColumn(HWND listView, int index, int width, const wchar_t* text)
 {
 	LVCOLUMNW column{};
@@ -68,13 +98,14 @@ HFONT sfh::SystemTray::Implementation::GetToolWindowFont()
 	NONCLIENTMETRICSW metrics{};
 	metrics.cbSize = sizeof(metrics);
 	LOGFONTW fontSpec{};
-	if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0) != FALSE)
+	const UINT dpi = m_toolWindowFontDpi != 0 ? m_toolWindowFontDpi : 96;
+	if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi) != FALSE)
 	{
 		fontSpec = metrics.lfMessageFont;
 	}
 	else
 	{
-		SystemParametersInfoW(SPI_GETICONTITLELOGFONT, sizeof(fontSpec), &fontSpec, 0);
+		SystemParametersInfoForDpi(SPI_GETICONTITLELOGFONT, sizeof(fontSpec), &fontSpec, 0, dpi);
 	}
 
 	fontSpec.lfHeight = ScaleFontHeight(fontSpec.lfHeight, 6, 5);

@@ -817,6 +817,7 @@ int __stdcall wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCm
 {
 	// initialize locale for ACP
 	setlocale(LC_ALL, "");
+	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	SetEnvironmentVariableW(L"__NO_DETOUR", L"TRUE");
 	auto cmdline = sfh::GetCommandLineVector(GetCommandLineW());
 	sfh::ProcessCommandLine(cmdline);

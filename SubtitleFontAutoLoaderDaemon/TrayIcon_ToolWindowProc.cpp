@@ -151,6 +151,9 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			case IDC_LOGS_SCROLL_BOTTOM_BUTTON:
 				ScrollLogsEditToBottom();
 				return 0;
+			case IDC_LOGS_AUTO_SCROLL_CHECK:
+				m_logsAutoScrollEnabled = (SendMessageW(m_logsAutoScrollCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+				return 0;
 			}
 		}
 		break;
@@ -273,6 +276,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			m_logsStatusLabel = nullptr;
 			m_logsContentSectionLabel = nullptr;
 			m_logsScrollBottomButton = nullptr;
+			m_logsAutoScrollCheck = nullptr;
 			m_logsEdit = nullptr;
 		}
 		return DefWindowProcW(hWnd, uMsg, wParam, lParam);

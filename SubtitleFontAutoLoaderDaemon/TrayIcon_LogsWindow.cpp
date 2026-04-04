@@ -58,6 +58,19 @@ void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 		reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_SCROLL_BOTTOM_BUTTON)),
 		wil::GetModuleInstanceHandle(),
 		nullptr);
+	m_logsAutoScrollCheck = CreateWindowExW(
+		0,
+		L"BUTTON",
+		L"自动滚动",
+		WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+		16,
+		164,
+		120,
+		28,
+		hWnd,
+		reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_AUTO_SCROLL_CHECK)),
+		wil::GetModuleInstanceHandle(),
+		nullptr);
 	m_logsStatusLabel = CreateWindowExW(
 		0,
 		L"EDIT",
@@ -99,6 +112,11 @@ void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 	if (m_logsScrollBottomButton != nullptr)
 	{
 		ApplyToolWindowFont(m_logsScrollBottomButton);
+	}
+	if (m_logsAutoScrollCheck != nullptr)
+	{
+		ApplyToolWindowFont(m_logsAutoScrollCheck);
+		SendMessageW(m_logsAutoScrollCheck, BM_SETCHECK, m_logsAutoScrollEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 	}
 	if (m_logsStatusLabel != nullptr)
 	{
@@ -159,6 +177,7 @@ void sfh::SystemTray::Implementation::LayoutLogsWindowControls(int clientWidth, 
 		|| m_logsStatusLabel == nullptr
 		|| m_logsContentSectionLabel == nullptr
 		|| m_logsScrollBottomButton == nullptr
+		|| m_logsAutoScrollCheck == nullptr
 		|| m_logsEdit == nullptr)
 	{
 		return;
@@ -190,7 +209,9 @@ void sfh::SystemTray::Implementation::LayoutLogsWindowControls(int clientWidth, 
 	MoveWindow(m_logsSubtitleLabel, left, top + titleHeight + ScaleDpi(10, dpi), availableWidth, subtitleHeight, TRUE);
 	MoveWindow(m_logsStatusLabel, left, top + titleHeight + ScaleDpi(10, dpi) + subtitleHeight + ScaleDpi(14, dpi), availableWidth, statusHeight, TRUE);
 	MoveWindow(m_logsContentSectionLabel, left, contentSectionTop, labelWidth, ScaleDpi(20, dpi), TRUE);
+	const int checkWidth = ScaleDpi(100, dpi);
 	MoveWindow(m_logsScrollBottomButton, buttonLeft, buttonTop, buttonWidth, buttonHeight, TRUE);
+	MoveWindow(m_logsAutoScrollCheck, buttonLeft - checkWidth - ScaleDpi(8, dpi), buttonTop + ScaleDpi(2, dpi), checkWidth, buttonHeight, TRUE);
 	MoveWindow(m_logsEdit, left, logTop, availableWidth, logHeight, TRUE);
 }
 
@@ -629,7 +650,7 @@ void sfh::SystemTray::Implementation::RefreshLogsWindowContent(bool forceReload)
 		statusText += L" | 仅显示最新日志片段";
 	}
 
-	const bool shouldScrollToBottom = forceReload || metadataChanged;
+	const bool shouldScrollToBottom = forceReload || (m_logsAutoScrollEnabled && metadataChanged);
 	UpdateLogsWindowText(statusText, contentText, shouldScrollToBottom);
 	m_logsLastLoadedText = contentText;
 	m_logsLastReadFailed = false;

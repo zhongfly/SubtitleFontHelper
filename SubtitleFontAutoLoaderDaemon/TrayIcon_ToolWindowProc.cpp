@@ -129,6 +129,19 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 		{
 			KillTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID);
 			SetTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID, FONTS_SEARCH_DEBOUNCE_INTERVAL_MS, nullptr);
+			if (m_fontsSearchClearButton != nullptr)
+			{
+				const bool hasText = GetWindowTextLengthW(m_fontsSearchEdit) > 0;
+				ShowWindow(m_fontsSearchClearButton, hasText ? SW_SHOW : SW_HIDE);
+			}
+			return 0;
+		}
+		if (hWnd == m_fontsWindow
+			&& LOWORD(wParam) == IDC_FONTS_SEARCH_CLEAR_BUTTON
+			&& HIWORD(wParam) == BN_CLICKED)
+		{
+			SetWindowTextW(m_fontsSearchEdit, L"");
+			SetFocus(m_fontsSearchEdit);
 			return 0;
 		}
 		if (hWnd == m_logsWindow && HIWORD(wParam) == BN_CLICKED)
@@ -244,6 +257,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			m_fontsIndexesSectionLabel = nullptr;
 			m_fontsSearchSectionLabel = nullptr;
 			m_fontsSearchEdit = nullptr;
+			m_fontsSearchClearButton = nullptr;
 			m_fontsSearchSummaryLabel = nullptr;
 			m_fontsIndexListView = nullptr;
 			m_fontsResultListView = nullptr;

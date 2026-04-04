@@ -38,6 +38,7 @@ private:
 	static constexpr int IDC_LOGS_STATUS_LABEL = 1004;
 	static constexpr int IDC_LOGS_VIEW_EDIT = 1005;
 	static constexpr int IDC_LOGS_SCROLL_BOTTOM_BUTTON = 1006;
+	static constexpr int IDC_FONTS_SEARCH_CLEAR_BUTTON = 1007;
 	static constexpr size_t LOG_VIEW_MAX_BYTES = 1024 * 1024;
 	static constexpr size_t LOG_VIEW_MAX_LINES = 5000;
 	static constexpr wchar_t LOG_FILE_NAME[] = L"SubtitleFontHelper.log";
@@ -108,6 +109,7 @@ private:
 	HWND m_fontsSearchSectionLabel = nullptr;
 	HWND m_fontsSearchEdit = nullptr;
 	HWND m_fontsSearchSummaryLabel = nullptr;
+	HWND m_fontsSearchClearButton = nullptr;
 	HWND m_fontsIndexListView = nullptr;
 	HWND m_fontsResultListView = nullptr;
 	HWND m_logsTitleLabel = nullptr;

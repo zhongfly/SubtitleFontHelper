@@ -192,6 +192,19 @@ void sfh::SystemTray::Implementation::SetupFontsWindowControls(HWND hWnd)
 		reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_FONTS_SEARCH_EDIT)),
 		wil::GetModuleInstanceHandle(),
 		nullptr);
+	m_fontsSearchClearButton = CreateWindowExW(
+		0,
+		L"BUTTON",
+		L"\u00D7",
+		WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+		16,
+		278,
+		24,
+		24,
+		hWnd,
+		reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_FONTS_SEARCH_CLEAR_BUTTON)),
+		wil::GetModuleInstanceHandle(),
+		nullptr);
 	m_fontsSearchSummaryLabel = CreateWindowExW(
 		0,
 		L"STATIC",
@@ -259,6 +272,7 @@ void sfh::SystemTray::Implementation::LayoutFontsWindowControls(int clientWidth,
 		|| m_fontsIndexesSectionLabel == nullptr
 		|| m_fontsSearchSectionLabel == nullptr
 		|| m_fontsSearchEdit == nullptr
+		|| m_fontsSearchClearButton == nullptr
 		|| m_fontsSearchSummaryLabel == nullptr
 		|| m_fontsIndexListView == nullptr
 		|| m_fontsResultListView == nullptr)
@@ -294,6 +308,15 @@ void sfh::SystemTray::Implementation::LayoutFontsWindowControls(int clientWidth,
 	MoveWindow(m_fontsIndexListView, left, indexTop, availableWidth, indexHeight, TRUE);
 	MoveWindow(m_fontsSearchSectionLabel, left, searchSectionTop, availableWidth, sectionHeight, TRUE);
 	MoveWindow(m_fontsSearchEdit, left, searchEditTop, availableWidth, editHeight, TRUE);
+	{
+		const int clearBtnSize = editHeight - ScaleDpi(6, dpi);
+		const int clearBtnMargin = ScaleDpi(3, dpi);
+		MoveWindow(m_fontsSearchClearButton,
+			left + availableWidth - clearBtnSize - clearBtnMargin,
+			searchEditTop + clearBtnMargin,
+			clearBtnSize, clearBtnSize, TRUE);
+		SendMessageW(m_fontsSearchEdit, EM_SETMARGINS, EC_RIGHTMARGIN, MAKELPARAM(0, clearBtnSize + clearBtnMargin * 2));
+	}
 	MoveWindow(m_fontsSearchSummaryLabel, left, searchEditTop + gap38, availableWidth, summaryHeight, TRUE);
 	MoveWindow(m_fontsResultListView, left, resultTop, availableWidth, resultHeight, TRUE);
 

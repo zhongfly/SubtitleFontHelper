@@ -21,13 +21,20 @@ private:
 	constexpr static UINT WM_FONT_UI_DATA_CHANGED = WM_USER + 2;
 	constexpr static UINT_PTR TRAY_REFRESH_TIMER_ID = 1;
 	constexpr static UINT_PTR FONTS_SEARCH_DEBOUNCE_TIMER_ID = 2;
+	constexpr static UINT_PTR LOGS_REFRESH_TIMER_ID = 3;
 	static constexpr auto FONTS_SEARCH_DEBOUNCE_INTERVAL_MS = 200;
+	static constexpr auto LOGS_REFRESH_INTERVAL_MS = 1000;
 	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
 	static constexpr wchar_t TRAY_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonTray";
 	static constexpr wchar_t TOOL_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonToolWindow";
 	static constexpr int IDC_FONTS_SEARCH_EDIT = 1001;
 	static constexpr int IDC_FONTS_INDEX_LIST = 1002;
 	static constexpr int IDC_FONTS_RESULT_LIST = 1003;
+	static constexpr int IDC_LOGS_STATUS_LABEL = 1004;
+	static constexpr int IDC_LOGS_VIEW_EDIT = 1005;
+	static constexpr size_t LOG_VIEW_MAX_BYTES = 1024 * 1024;
+	static constexpr size_t LOG_VIEW_MAX_LINES = 5000;
+	static constexpr wchar_t LOG_FILE_NAME[] = L"SubtitleFontHelper.log";
 
 	enum class ToolWindowKind
 	{
@@ -51,6 +58,8 @@ private:
 	HWND m_fontsSearchSummaryLabel = nullptr;
 	HWND m_fontsIndexListView = nullptr;
 	HWND m_fontsResultListView = nullptr;
+	HWND m_logsStatusLabel = nullptr;
+	HWND m_logsEdit = nullptr;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
@@ -65,6 +74,12 @@ private:
 	std::atomic<size_t> m_managedIndexTotalFiles = 0;
 	std::atomic<bool> m_exitRequested = false;
 	wil::unique_event m_startEvent;
+	std::wstring m_logsPath;
+	std::wstring m_logsLastLoadedText;
+	ULONGLONG m_logsLastFileSize = 0;
+	FILETIME m_logsLastWriteTime = {};
+	bool m_logsHasObservedFile = false;
+	bool m_logsLastReadFailed = false;
 public:
 	Implementation(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider)
 		: m_daemon(daemon),
@@ -78,6 +93,7 @@ public:
 				return;
 			try
 			{
+				ResolveLogsPath();
 				SetupMessageWindow();
 				MessageLoop();
 			}
@@ -345,7 +361,7 @@ private:
 			m_logsWindow,
 			ToolWindowKind::Logs,
 			L"Logs",
-			L"Logs 窗口占位，后续任务中会接入内置日志查看器。");
+			L"");
 	}
 
 	void ShowToolWindow(HWND& handle, ToolWindowKind kind, const wchar_t* title, const wchar_t* text)
@@ -510,6 +526,47 @@ private:
 		}
 	}
 
+	void SetupLogsWindowControls(HWND hWnd)
+	{
+		auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+		m_logsStatusLabel = CreateWindowExW(
+			0,
+			L"STATIC",
+			L"",
+			WS_CHILD | WS_VISIBLE | SS_LEFT,
+			16,
+			16,
+			700,
+			20,
+			hWnd,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_STATUS_LABEL)),
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		m_logsEdit = CreateWindowExW(
+			WS_EX_CLIENTEDGE,
+			L"EDIT",
+			L"",
+			WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL
+				| ES_AUTOHSCROLL | ES_READONLY,
+			16,
+			44,
+			700,
+			320,
+			hWnd,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_VIEW_EDIT)),
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		if (m_logsStatusLabel != nullptr)
+		{
+			SendMessageW(m_logsStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+		}
+		if (m_logsEdit != nullptr)
+		{
+			SendMessageW(m_logsEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+			SendMessageW(m_logsEdit, EM_LIMITTEXT, 0x7FFFFFFE, 0);
+		}
+	}
+
 	void LayoutFontsWindowControls(int clientWidth, int clientHeight)
 	{
 		if (m_fontsStatusLabel == nullptr
@@ -549,9 +606,271 @@ private:
 		ListView_SetColumnWidth(m_fontsResultListView, 6, (std::max)(160, availableWidth * 28 / 100));
 	}
 
+	void LayoutLogsWindowControls(int clientWidth, int clientHeight)
+	{
+		if (m_logsStatusLabel == nullptr || m_logsEdit == nullptr)
+		{
+			return;
+		}
+
+		const int left = 16;
+		const int right = 16;
+		const int top = 16;
+		const int availableWidth = (std::max)(320, clientWidth - left - right);
+		const int logTop = top + 28;
+		const int logHeight = (std::max)(120, clientHeight - logTop - 16);
+
+		MoveWindow(m_logsStatusLabel, left, top, availableWidth, 20, TRUE);
+		MoveWindow(m_logsEdit, left, logTop, availableWidth, logHeight, TRUE);
+	}
+
 	static void SetListViewRowText(HWND listView, int rowIndex, int columnIndex, const std::wstring& text)
 	{
 		ListView_SetItemText(listView, rowIndex, columnIndex, const_cast<wchar_t*>(text.c_str()));
+	}
+
+	static std::wstring Utf8ToWideBestEffort(std::string_view utf8)
+	{
+		for (size_t offset = 0; offset < (std::min)(utf8.size(), static_cast<size_t>(4)); ++offset)
+		{
+			const auto length = static_cast<int>(utf8.size() - offset);
+			if (length <= 0)
+			{
+				break;
+			}
+
+			const auto* start = utf8.data() + offset;
+			const int wideLength = MultiByteToWideChar(
+				CP_UTF8,
+				MB_ERR_INVALID_CHARS,
+				start,
+				length,
+				nullptr,
+				0);
+			if (wideLength <= 0)
+			{
+				continue;
+			}
+
+			std::wstring wide(static_cast<size_t>(wideLength), L'\0');
+			if (MultiByteToWideChar(
+				CP_UTF8,
+				MB_ERR_INVALID_CHARS,
+				start,
+				length,
+				wide.data(),
+				wideLength) > 0)
+			{
+				return wide;
+			}
+		}
+
+		return L"";
+	}
+
+	static std::wstring FormatFileTimeText(const FILETIME& fileTime)
+	{
+		FILETIME localFileTime{};
+		SYSTEMTIME localSystemTime{};
+		if (FileTimeToLocalFileTime(&fileTime, &localFileTime) == FALSE
+			|| FileTimeToSystemTime(&localFileTime, &localSystemTime) == FALSE)
+		{
+			return L"未知";
+		}
+
+		wchar_t buffer[64]{};
+		StringCchPrintfW(
+			buffer,
+			std::size(buffer),
+			L"%04u-%02u-%02u %02u:%02u:%02u",
+			localSystemTime.wYear,
+			localSystemTime.wMonth,
+			localSystemTime.wDay,
+			localSystemTime.wHour,
+			localSystemTime.wMinute,
+			localSystemTime.wSecond);
+		return buffer;
+	}
+
+	void ResolveLogsPath()
+	{
+		const std::filesystem::path modulePath{wil::GetModuleFileNameW<wil::unique_hlocal_string>().get()};
+		m_logsPath = (modulePath.parent_path() / LOG_FILE_NAME).wstring();
+	}
+
+	bool TryGetLogFileMetadata(ULONGLONG& fileSize, FILETIME& lastWriteTime, bool& exists) const
+	{
+		WIN32_FILE_ATTRIBUTE_DATA attributes{};
+		if (GetFileAttributesExW(m_logsPath.c_str(), GetFileExInfoStandard, &attributes) == FALSE)
+		{
+			const auto error = GetLastError();
+			if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+			{
+				exists = false;
+				fileSize = 0;
+				lastWriteTime = {};
+				return true;
+			}
+			return false;
+		}
+
+		exists = (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+		if (!exists)
+		{
+			fileSize = 0;
+			lastWriteTime = {};
+			return true;
+		}
+
+		ULARGE_INTEGER size{};
+		size.LowPart = attributes.nFileSizeLow;
+		size.HighPart = attributes.nFileSizeHigh;
+		fileSize = size.QuadPart;
+		lastWriteTime = attributes.ftLastWriteTime;
+		return true;
+	}
+
+	std::wstring BuildLogsFallbackText(const std::wstring& message) const
+	{
+		return message + L"\r\n\r\n路径：\r\n" + m_logsPath;
+	}
+
+	std::wstring TrimLogsToLastLines(std::wstring text, bool& truncatedByLines) const
+	{
+		size_t lineCount = 0;
+		for (wchar_t ch : text)
+		{
+			if (ch == L'\n')
+			{
+				++lineCount;
+			}
+		}
+
+		if (!text.empty() && text.back() != L'\n')
+		{
+			++lineCount;
+		}
+
+		if (lineCount <= LOG_VIEW_MAX_LINES)
+		{
+			truncatedByLines = false;
+			return text;
+		}
+
+		size_t newlineSeen = 0;
+		size_t startIndex = 0;
+		for (size_t i = text.size(); i > 0; --i)
+		{
+			if (text[i - 1] == L'\n')
+			{
+				++newlineSeen;
+				if (newlineSeen >= LOG_VIEW_MAX_LINES)
+				{
+					startIndex = i;
+					break;
+				}
+			}
+		}
+
+		truncatedByLines = true;
+		return text.substr(startIndex);
+	}
+
+	bool TryReadLogTail(std::wstring& text, bool& truncated, std::wstring& errorMessage)
+	{
+		wil::unique_hfile file(CreateFileW(
+			m_logsPath.c_str(),
+			GENERIC_READ,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			nullptr,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			nullptr));
+		if (!file.is_valid())
+		{
+			errorMessage = L"读取日志失败。";
+			return false;
+		}
+
+		LARGE_INTEGER fileSize{};
+		if (GetFileSizeEx(file.get(), &fileSize) == FALSE)
+		{
+			errorMessage = L"读取日志大小失败。";
+			return false;
+		}
+
+		const auto totalBytes = static_cast<ULONGLONG>((std::max)(LONGLONG{0}, fileSize.QuadPart));
+		const auto bytesToRead = static_cast<DWORD>((std::min)(totalBytes, static_cast<ULONGLONG>(LOG_VIEW_MAX_BYTES)));
+		LARGE_INTEGER offset{};
+		offset.QuadPart = static_cast<LONGLONG>(totalBytes - bytesToRead);
+		if (SetFilePointerEx(file.get(), offset, nullptr, FILE_BEGIN) == FALSE)
+		{
+			errorMessage = L"定位日志尾部失败。";
+			return false;
+		}
+
+		std::string buffer(static_cast<size_t>(bytesToRead), '\0');
+		size_t totalRead = 0;
+		while (totalRead < buffer.size())
+		{
+			DWORD readBytes = 0;
+			if (ReadFile(
+				file.get(),
+				buffer.data() + totalRead,
+				static_cast<DWORD>(buffer.size() - totalRead),
+				&readBytes,
+				nullptr) == FALSE)
+			{
+				errorMessage = L"读取日志内容失败。";
+				return false;
+			}
+			if (readBytes == 0)
+			{
+				break;
+			}
+			totalRead += readBytes;
+		}
+		buffer.resize(totalRead);
+
+		bool truncatedByBytes = totalBytes > static_cast<ULONGLONG>(LOG_VIEW_MAX_BYTES);
+		if (truncatedByBytes)
+		{
+			const auto newlinePos = buffer.find('\n');
+			if (newlinePos != std::string::npos)
+			{
+				buffer.erase(0, newlinePos + 1);
+			}
+		}
+
+		text = Utf8ToWideBestEffort(buffer);
+		if (text.empty() && !buffer.empty())
+		{
+			errorMessage = L"解析日志文本失败。";
+			return false;
+		}
+
+		bool truncatedByLines = false;
+		text = TrimLogsToLastLines(std::move(text), truncatedByLines);
+		truncated = truncatedByBytes || truncatedByLines;
+		return true;
+	}
+
+	void UpdateLogsWindowText(const std::wstring& statusText, const std::wstring& contentText, bool scrollToBottom)
+	{
+		if (m_logsStatusLabel != nullptr)
+		{
+			SetWindowTextW(m_logsStatusLabel, statusText.c_str());
+		}
+		if (m_logsEdit != nullptr)
+		{
+			SetWindowTextW(m_logsEdit, contentText.c_str());
+			if (scrollToBottom)
+			{
+				const auto length = GetWindowTextLengthW(m_logsEdit);
+				SendMessageW(m_logsEdit, EM_SETSEL, static_cast<WPARAM>(length), static_cast<LPARAM>(length));
+				SendMessageW(m_logsEdit, EM_SCROLLCARET, 0, 0);
+			}
+		}
 	}
 
 	void PopulateFontsIndexList(const FontUiSnapshot& snapshot)
@@ -616,26 +935,14 @@ private:
 				LayoutFontsWindowControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
 				RefreshFontsWindowContent();
 			}
-			else
+			else if (createParams != nullptr && createParams->m_kind == ToolWindowKind::Logs)
 			{
-				auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-				HWND label = CreateWindowExW(
-					0,
-					L"STATIC",
-					createParams != nullptr ? createParams->m_text : L"",
-					WS_CHILD | WS_VISIBLE | SS_LEFT,
-					16,
-					16,
-					660,
-					280,
-					hWnd,
-					nullptr,
-					wil::GetModuleInstanceHandle(),
-					nullptr);
-				if (label != nullptr)
-				{
-					SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-				}
+				SetupLogsWindowControls(hWnd);
+				RECT clientRect{};
+				GetClientRect(hWnd, &clientRect);
+				LayoutLogsWindowControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+				RefreshLogsWindowContent(true);
+				SetTimer(hWnd, LOGS_REFRESH_TIMER_ID, LOGS_REFRESH_INTERVAL_MS, nullptr);
 			}
 			return 0;
 		}
@@ -643,6 +950,11 @@ private:
 			if (hWnd == m_fontsWindow)
 			{
 				LayoutFontsWindowControls(LOWORD(lParam), HIWORD(lParam));
+				return 0;
+			}
+			if (hWnd == m_logsWindow)
+			{
+				LayoutLogsWindowControls(LOWORD(lParam), HIWORD(lParam));
 				return 0;
 			}
 			break;
@@ -663,11 +975,20 @@ private:
 				RefreshFontsWindowContent();
 				return 0;
 			}
+			if (hWnd == m_logsWindow && wParam == LOGS_REFRESH_TIMER_ID)
+			{
+				RefreshLogsWindowContent(false);
+				return 0;
+			}
 			break;
 		case WM_CLOSE:
 			if (hWnd == m_fontsWindow)
 			{
 				KillTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID);
+			}
+			else if (hWnd == m_logsWindow)
+			{
+				KillTimer(hWnd, LOGS_REFRESH_TIMER_ID);
 			}
 			DestroyWindow(hWnd);
 			return 0;
@@ -684,6 +1005,8 @@ private:
 			else if (hWnd == m_logsWindow)
 			{
 				m_logsWindow = nullptr;
+				m_logsStatusLabel = nullptr;
+				m_logsEdit = nullptr;
 			}
 			return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 		default:
@@ -792,6 +1115,87 @@ private:
 		}
 
 		PopulateFontsResultList(snapshot);
+	}
+
+	void RefreshLogsWindowContent(bool forceReload)
+	{
+		if (m_logsStatusLabel == nullptr || m_logsEdit == nullptr || m_logsPath.empty())
+		{
+			return;
+		}
+
+		ULONGLONG fileSize = 0;
+		FILETIME lastWriteTime{};
+		bool exists = false;
+		if (!TryGetLogFileMetadata(fileSize, lastWriteTime, exists))
+		{
+			const std::wstring statusText = L"日志状态获取失败。";
+			const std::wstring contentText = BuildLogsFallbackText(L"当前无法读取日志文件元数据。");
+			UpdateLogsWindowText(statusText, contentText, false);
+			m_logsLastLoadedText = contentText;
+			m_logsLastReadFailed = true;
+			m_logsHasObservedFile = false;
+			m_logsLastFileSize = 0;
+			m_logsLastWriteTime = {};
+			return;
+		}
+
+		if (!exists)
+		{
+			const std::wstring statusText = L"日志文件尚未创建。";
+			const std::wstring contentText = BuildLogsFallbackText(L"当前未找到日志文件。");
+			if (forceReload || !m_logsHasObservedFile || m_logsLastLoadedText != contentText)
+			{
+				UpdateLogsWindowText(statusText, contentText, false);
+			}
+			m_logsLastLoadedText = contentText;
+			m_logsLastReadFailed = false;
+			m_logsHasObservedFile = false;
+			m_logsLastFileSize = 0;
+			m_logsLastWriteTime = {};
+			return;
+		}
+
+		const bool metadataChanged = !m_logsHasObservedFile
+			|| fileSize != m_logsLastFileSize
+			|| CompareFileTime(&lastWriteTime, &m_logsLastWriteTime) != 0;
+		if (!forceReload && !metadataChanged && !m_logsLastReadFailed)
+		{
+			return;
+		}
+
+		std::wstring contentText;
+		std::wstring errorMessage;
+		bool truncated = false;
+		if (!TryReadLogTail(contentText, truncated, errorMessage))
+		{
+			const std::wstring statusText = L"读取日志失败。";
+			const std::wstring fallbackText = BuildLogsFallbackText(errorMessage.empty() ? L"当前无法读取日志内容。" : errorMessage);
+			UpdateLogsWindowText(statusText, fallbackText, false);
+			m_logsLastLoadedText = fallbackText;
+			m_logsLastReadFailed = true;
+			m_logsHasObservedFile = true;
+			m_logsLastFileSize = fileSize;
+			m_logsLastWriteTime = lastWriteTime;
+			return;
+		}
+
+		std::wstring statusText = L"日志路径：";
+		statusText += m_logsPath;
+		statusText += L" | 更新时间：";
+		statusText += FormatFileTimeText(lastWriteTime);
+		if (truncated)
+		{
+			statusText += L" | 仅显示最新日志片段";
+		}
+
+		const bool shouldScrollToBottom = forceReload || metadataChanged;
+		UpdateLogsWindowText(statusText, contentText, shouldScrollToBottom);
+		m_logsLastLoadedText = contentText;
+		m_logsLastReadFailed = false;
+		m_logsHasObservedFile = true;
+		m_logsLastFileSize = fileSize;
+		m_logsLastWriteTime = lastWriteTime;
 	}
 };
 

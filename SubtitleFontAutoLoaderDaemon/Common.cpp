@@ -78,10 +78,19 @@ std::string sfh::GetFileContent(const std::wstring& path)
 	wil::unique_file fp;
 	if (_wfopen_s(fp.put(), path.c_str(), L"rb"))
 		throw std::runtime_error("unable to open file");
-	fseek(fp.get(), 0, SEEK_END);
-	ret.resize(ftell(fp.get()));
+	if (fseek(fp.get(), 0, SEEK_END) != 0)
+		throw std::runtime_error("unable to seek file");
+	const long fileSize = ftell(fp.get());
+	if (fileSize < 0)
+		throw std::runtime_error("unable to get file size");
+	ret.resize(static_cast<size_t>(fileSize));
 	rewind(fp.get());
-	fread(ret.data(), sizeof(char), ret.size(), fp.get());
+	if (!ret.empty())
+	{
+		const size_t readBytes = fread(ret.data(), sizeof(char), ret.size(), fp.get());
+		if (readBytes != ret.size())
+			throw std::runtime_error("unable to read file");
+	}
 	return ret;
 }
 

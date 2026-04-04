@@ -204,6 +204,10 @@ extern "C" {
 					&hModuleKernel32) == FALSE);
 			auto threadProc = reinterpret_cast<LPTHREAD_START_ROUTINE>(
 				GetProcAddress(hModuleKernel32, "LoadLibraryW"));
+			if (threadProc == nullptr)
+			{
+				throw std::runtime_error("GetProcAddress(LoadLibraryW) failed");
+			}
 
 			wil::unique_handle hThread(CreateRemoteThread(
 				hProcess.get(),

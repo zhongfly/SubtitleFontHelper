@@ -22,7 +22,7 @@ flowchart LR
     RPC[RpcServer<br/>Named Pipe + IOCP]
     PM[ProcessMonitor<br/>WMI 进程创建事件]
     PF[Prefetch<br/>LRU + feedback]
-    TRAY[SystemTray<br/>Reload/Exit]
+    TRAY[SystemTray<br/>Fonts/Logs/Exit]
   end
 
   XML[FontIndex.xml] --> QS
@@ -104,7 +104,7 @@ source_folders = ['fonts']
 主线程运行 `DaemonMain()`，通过队列处理四类消息：
 
 - `Init`：启动/重载初始化（`OnInit()`）
-- `Reload`：重新读取配置、重建服务对象（`OnInit()`）
+- `Reload`：重新读取配置、重建服务对象（`OnInit()`，由文件监视与内部消息触发，不再暴露托盘手动入口）
 - `Exit`：正常退出
 - `Exception`：收到子线程异常后在主线程 rethrow，最终由 `wWinMain` 捕获并弹框退出
 
@@ -130,9 +130,12 @@ stateDiagram-v2
 
 - 创建隐藏窗口，注册菜单资源 `IDR_TRAYMENU`，并进入消息循环。
 - 启动初期显示 “Loading” 图标与提示；`OnInit()` 完成后调用 `SystemTray::NotifyFinishLoad()` 切换到常规图标。
-- 右键菜单提供 `Reload` 与 `Exit`：
-  - `Reload` → `IDaemon::NotifyReload()` → 主线程 `OnInit()` 重建服务
-  - `Exit` → `IDaemon::NotifyExit()` → 主线程退出
+- 右键菜单提供 `Fonts`、`Logs` 与 `Exit`：
+  - `Fonts`：打开单实例字体浏览窗口，显示当前已加载字体索引概览，并支持按 `family name`、`FullName`、`PostScriptName` 搜索字体。
+  - `Logs`：打开单实例日志查看窗口，只读显示当前 `SubtitleFontHelper.log` 主日志文件尾部；窗口打开期间每秒检查一次文件大小和最后写入时间，发生追加、截断或轮转后自动刷新。
+  - `Exit`：`IDaemon::NotifyExit()` → 主线程退出
+- `Fonts` 窗口通过 `SystemTray::NotifyFontUiDataChanged()` 事件驱动刷新，不轮询 `QueryService` 版本号。
+- `Logs` 窗口只显示当前主日志文件的最新片段，限制为最近 `1 MiB` 与最近 `5000` 行中的较小结果；归档文件 `SubtitleFontHelper.log.1` 到 `.5` 不在当前窗口中直接查看。
 - `WM_ENDSESSION`（注销/关机）会触发退出。
 
 ## 5. 进程监控（ProcessMonitor：WMI 异步事件）

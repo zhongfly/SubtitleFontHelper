@@ -46,6 +46,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			RefreshLogsWindowContent(true);
 			SetTimer(hWnd, LOGS_REFRESH_TIMER_ID, LOGS_REFRESH_INTERVAL_MS, nullptr);
 		}
+		ApplyDarkModeToWindow(hWnd);
 		return 0;
 	}
 	case WM_SIZE:
@@ -189,19 +190,19 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 				case CDDS_PREPAINT:
 					return CDRF_NOTIFYITEMDRAW;
 				case CDDS_ITEMPREPAINT:
-					customDraw->clrText = PRIMARY_TEXT_COLOR;
+					customDraw->clrText = m_colors.primaryText;
 					if ((customDraw->nmcd.dwItemSpec % 2) == 0)
 					{
-						customDraw->clrTextBk = PANEL_BACKGROUND_COLOR;
+						customDraw->clrTextBk = m_colors.panelBackground;
 					}
 					else
 					{
-						customDraw->clrTextBk = LIST_ALT_BACKGROUND_COLOR;
+						customDraw->clrTextBk = m_colors.listAltBackground;
 					}
 					if ((customDraw->nmcd.uItemState & CDIS_SELECTED) != 0)
 					{
-						customDraw->clrText = LIST_SELECTED_TEXT_COLOR;
-						customDraw->clrTextBk = LIST_SELECTED_BACKGROUND_COLOR;
+						customDraw->clrText = m_colors.listSelectedText;
+						customDraw->clrTextBk = m_colors.listSelectedBackground;
 					}
 					return CDRF_NEWFONT;
 				default:
@@ -267,48 +268,48 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 		auto control = reinterpret_cast<HWND>(lParam);
 		auto dc = reinterpret_cast<HDC>(wParam);
 		SetBkMode(dc, TRANSPARENT);
-		SetTextColor(dc, PRIMARY_TEXT_COLOR);
+		SetTextColor(dc, m_colors.primaryText);
 
 		if (control == m_fontsTitleLabel || control == m_logsTitleLabel)
 		{
-			SetTextColor(dc, ACCENT_TEXT_COLOR);
-			SetBkColor(dc, WINDOW_BACKGROUND_COLOR);
+			SetTextColor(dc, m_colors.accentText);
+			SetBkColor(dc, m_colors.windowBackground);
 			return reinterpret_cast<LRESULT>(m_windowBackgroundBrush != nullptr ? m_windowBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 		if (control == m_fontsIndexesSectionLabel
 			|| control == m_fontsSearchSectionLabel
 			|| control == m_logsContentSectionLabel)
 		{
-			SetTextColor(dc, ACCENT_TEXT_COLOR);
-			SetBkColor(dc, WINDOW_BACKGROUND_COLOR);
+			SetTextColor(dc, m_colors.accentText);
+			SetBkColor(dc, m_colors.windowBackground);
 			return reinterpret_cast<LRESULT>(m_windowBackgroundBrush != nullptr ? m_windowBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 		if (control == m_fontsStatusLabel || control == m_fontsSearchSummaryLabel || control == m_logsSubtitleLabel)
 		{
-			SetTextColor(dc, SECONDARY_TEXT_COLOR);
-			SetBkColor(dc, WINDOW_BACKGROUND_COLOR);
+			SetTextColor(dc, m_colors.secondaryText);
+			SetBkColor(dc, m_colors.windowBackground);
 			return reinterpret_cast<LRESULT>(m_windowBackgroundBrush != nullptr ? m_windowBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 		if (control == m_fontsSearchEdit)
 		{
 			SetBkMode(dc, OPAQUE);
-			SetBkColor(dc, INPUT_BACKGROUND_COLOR);
-			return reinterpret_cast<LRESULT>(m_panelBackgroundBrush != nullptr ? m_panelBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
+			SetBkColor(dc, m_colors.inputBackground);
+			return reinterpret_cast<LRESULT>(m_inputBackgroundBrush != nullptr ? m_inputBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 		if (control == m_logsStatusLabel)
 		{
 			SetBkMode(dc, OPAQUE);
-			SetBkColor(dc, METADATA_BACKGROUND_COLOR);
+			SetBkColor(dc, m_colors.metadataBackground);
 			return reinterpret_cast<LRESULT>(m_metadataBackgroundBrush != nullptr ? m_metadataBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 		if (control == m_logsEdit)
 		{
 			SetBkMode(dc, OPAQUE);
-			SetBkColor(dc, LOG_BACKGROUND_COLOR);
+			SetBkColor(dc, m_colors.logBackground);
 			return reinterpret_cast<LRESULT>(m_logBackgroundBrush != nullptr ? m_logBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
 
-		SetBkColor(dc, WINDOW_BACKGROUND_COLOR);
+		SetBkColor(dc, m_colors.windowBackground);
 		return reinterpret_cast<LRESULT>(m_windowBackgroundBrush != nullptr ? m_windowBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 	}
 	default:

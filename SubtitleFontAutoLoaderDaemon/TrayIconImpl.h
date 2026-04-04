@@ -41,17 +41,49 @@ private:
 	static constexpr size_t LOG_VIEW_MAX_BYTES = 1024 * 1024;
 	static constexpr size_t LOG_VIEW_MAX_LINES = 5000;
 	static constexpr wchar_t LOG_FILE_NAME[] = L"SubtitleFontHelper.log";
-	static constexpr COLORREF WINDOW_BACKGROUND_COLOR = RGB(244, 240, 232);
-	static constexpr COLORREF PANEL_BACKGROUND_COLOR = RGB(252, 249, 243);
-	static constexpr COLORREF METADATA_BACKGROUND_COLOR = RGB(236, 231, 222);
-	static constexpr COLORREF LOG_BACKGROUND_COLOR = RGB(248, 245, 239);
-	static constexpr COLORREF INPUT_BACKGROUND_COLOR = RGB(255, 253, 248);
-	static constexpr COLORREF PRIMARY_TEXT_COLOR = RGB(50, 44, 36);
-	static constexpr COLORREF SECONDARY_TEXT_COLOR = RGB(102, 92, 78);
-	static constexpr COLORREF ACCENT_TEXT_COLOR = RGB(123, 87, 43);
-	static constexpr COLORREF LIST_ALT_BACKGROUND_COLOR = RGB(248, 244, 237);
-	static constexpr COLORREF LIST_SELECTED_BACKGROUND_COLOR = RGB(214, 224, 232);
-	static constexpr COLORREF LIST_SELECTED_TEXT_COLOR = RGB(35, 31, 26);
+
+	struct ThemeColors
+	{
+		COLORREF windowBackground;
+		COLORREF panelBackground;
+		COLORREF metadataBackground;
+		COLORREF logBackground;
+		COLORREF inputBackground;
+		COLORREF primaryText;
+		COLORREF secondaryText;
+		COLORREF accentText;
+		COLORREF listAltBackground;
+		COLORREF listSelectedBackground;
+		COLORREF listSelectedText;
+	};
+
+	static constexpr ThemeColors LIGHT_COLORS = {
+		RGB(244, 240, 232),  // windowBackground
+		RGB(252, 249, 243),  // panelBackground
+		RGB(236, 231, 222),  // metadataBackground
+		RGB(248, 245, 239),  // logBackground
+		RGB(255, 253, 248),  // inputBackground
+		RGB(50, 44, 36),     // primaryText
+		RGB(102, 92, 78),    // secondaryText
+		RGB(123, 87, 43),    // accentText
+		RGB(248, 244, 237),  // listAltBackground
+		RGB(214, 224, 232),  // listSelectedBackground
+		RGB(35, 31, 26),     // listSelectedText
+	};
+
+	static constexpr ThemeColors DARK_COLORS = {
+		RGB(32, 32, 32),     // windowBackground
+		RGB(42, 42, 42),     // panelBackground
+		RGB(50, 48, 44),     // metadataBackground
+		RGB(38, 38, 38),     // logBackground
+		RGB(48, 48, 48),     // inputBackground
+		RGB(220, 216, 210),  // primaryText
+		RGB(160, 155, 148),  // secondaryText
+		RGB(200, 165, 110),  // accentText
+		RGB(38, 38, 38),     // listAltBackground
+		RGB(55, 75, 105),    // listSelectedBackground
+		RGB(230, 228, 224),  // listSelectedText
+	};
 
 	enum class ToolWindowKind
 	{
@@ -92,6 +124,9 @@ private:
 	HBRUSH m_panelBackgroundBrush = nullptr;
 	HBRUSH m_metadataBackgroundBrush = nullptr;
 	HBRUSH m_logBackgroundBrush = nullptr;
+	HBRUSH m_inputBackgroundBrush = nullptr;
+	ThemeColors m_colors = LIGHT_COLORS;
+	bool m_darkModeEnabled = false;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
@@ -141,6 +176,12 @@ private:
 
 	void InvalidateFontCache();
 	void EnsureFontCacheForDpi(UINT dpi);
+
+	// Dark mode
+	void DetectDarkMode();
+	void RecreateThemeBrushes();
+	void ApplyDarkModeToWindow(HWND hWnd);
+	void RefreshThemeForOpenWindows();
 
 	// Core (tray icon, message loop)
 	bool IsLoading() const;

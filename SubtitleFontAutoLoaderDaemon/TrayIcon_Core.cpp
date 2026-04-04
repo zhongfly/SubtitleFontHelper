@@ -64,6 +64,10 @@ sfh::SystemTray::Implementation::~Implementation()
 	{
 		DeleteObject(m_logBackgroundBrush);
 	}
+	if (m_inputBackgroundBrush != nullptr)
+	{
+		DeleteObject(m_inputBackgroundBrush);
+	}
 }
 
 void sfh::SystemTray::Implementation::Start()
@@ -151,22 +155,8 @@ void sfh::SystemTray::Implementation::SetupMessageWindow()
 	commonControls.dwICC = ICC_LISTVIEW_CLASSES;
 	InitCommonControlsEx(&commonControls);
 
-	if (m_windowBackgroundBrush == nullptr)
-	{
-		m_windowBackgroundBrush = CreateSolidBrush(WINDOW_BACKGROUND_COLOR);
-	}
-	if (m_panelBackgroundBrush == nullptr)
-	{
-		m_panelBackgroundBrush = CreateSolidBrush(PANEL_BACKGROUND_COLOR);
-	}
-	if (m_metadataBackgroundBrush == nullptr)
-	{
-		m_metadataBackgroundBrush = CreateSolidBrush(METADATA_BACKGROUND_COLOR);
-	}
-	if (m_logBackgroundBrush == nullptr)
-	{
-		m_logBackgroundBrush = CreateSolidBrush(LOG_BACKGROUND_COLOR);
-	}
+	DetectDarkMode();
+	RecreateThemeBrushes();
 
 	WNDCLASSW wndClass;
 	RtlZeroMemory(&wndClass, sizeof(wndClass));
@@ -266,6 +256,11 @@ LRESULT sfh::SystemTray::Implementation::MessageHandler(HWND hWnd, UINT uMsg, WP
 		break;
 	case WM_ENDSESSION:
 		m_daemon->NotifyExit();
+		break;
+	case WM_SETTINGCHANGE:
+		DetectDarkMode();
+		RecreateThemeBrushes();
+		RefreshThemeForOpenWindows();
 		break;
 	case WM_CLOSE:
 		KillTimer(hWnd, TRAY_REFRESH_TIMER_ID);

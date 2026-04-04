@@ -1,6 +1,81 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
 
+#include <dwmapi.h>
+#pragma comment(lib, "Dwmapi.lib")
+
+void sfh::SystemTray::Implementation::DetectDarkMode()
+{
+	DWORD value = 1;
+	DWORD size = sizeof(value);
+	if (RegGetValueW(
+		HKEY_CURRENT_USER,
+		L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+		L"AppsUseLightTheme",
+		RRF_RT_REG_DWORD,
+		nullptr,
+		&value,
+		&size) == ERROR_SUCCESS)
+	{
+		m_darkModeEnabled = (value == 0);
+	}
+	else
+	{
+		m_darkModeEnabled = false;
+	}
+	m_colors = m_darkModeEnabled ? DARK_COLORS : LIGHT_COLORS;
+}
+
+static void DeleteBrushIfValid(HBRUSH& brush)
+{
+	if (brush != nullptr)
+	{
+		DeleteObject(brush);
+		brush = nullptr;
+	}
+}
+
+void sfh::SystemTray::Implementation::RecreateThemeBrushes()
+{
+	DeleteBrushIfValid(m_windowBackgroundBrush);
+	DeleteBrushIfValid(m_panelBackgroundBrush);
+	DeleteBrushIfValid(m_metadataBackgroundBrush);
+	DeleteBrushIfValid(m_logBackgroundBrush);
+	DeleteBrushIfValid(m_inputBackgroundBrush);
+
+	m_windowBackgroundBrush = CreateSolidBrush(m_colors.windowBackground);
+	m_panelBackgroundBrush = CreateSolidBrush(m_colors.panelBackground);
+	m_metadataBackgroundBrush = CreateSolidBrush(m_colors.metadataBackground);
+	m_logBackgroundBrush = CreateSolidBrush(m_colors.logBackground);
+	m_inputBackgroundBrush = CreateSolidBrush(m_colors.inputBackground);
+}
+
+void sfh::SystemTray::Implementation::ApplyDarkModeToWindow(HWND hWnd)
+{
+	if (hWnd == nullptr)
+	{
+		return;
+	}
+	BOOL useDarkMode = m_darkModeEnabled ? TRUE : FALSE;
+	DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
+}
+
+void sfh::SystemTray::Implementation::RefreshThemeForOpenWindows()
+{
+	if (m_fontsWindow != nullptr)
+	{
+		ApplyDarkModeToWindow(m_fontsWindow);
+		ConfigureListViewColors(m_fontsIndexListView, m_colors.panelBackground);
+		ConfigureListViewColors(m_fontsResultListView, m_colors.panelBackground);
+		InvalidateRect(m_fontsWindow, nullptr, TRUE);
+	}
+	if (m_logsWindow != nullptr)
+	{
+		ApplyDarkModeToWindow(m_logsWindow);
+		InvalidateRect(m_logsWindow, nullptr, TRUE);
+	}
+}
+
 void sfh::SystemTray::Implementation::InvalidateFontCache()
 {
 	if (m_toolWindowFont != nullptr)
@@ -242,7 +317,7 @@ void sfh::SystemTray::Implementation::ConfigureListViewColors(HWND listView, COL
 
 	ListView_SetBkColor(listView, backgroundColor);
 	ListView_SetTextBkColor(listView, backgroundColor);
-	ListView_SetTextColor(listView, PRIMARY_TEXT_COLOR);
+	ListView_SetTextColor(listView, m_colors.primaryText);
 	ListView_SetExtendedListViewStyle(
 		listView,
 		ListView_GetExtendedListViewStyle(listView) | LVS_EX_INFOTIP);

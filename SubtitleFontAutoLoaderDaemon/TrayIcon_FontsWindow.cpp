@@ -114,7 +114,7 @@ HWND sfh::SystemTray::Implementation::CreateFontsListView(HWND parent, int contr
 			listView,
 			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES);
 		ApplyToolWindowFont(listView);
-		ConfigureListViewColors(listView, PANEL_BACKGROUND_COLOR);
+		ConfigureListViewColors(listView, m_colors.panelBackground);
 		auto header = ListView_GetHeader(listView);
 		ApplyToolWindowFont(header);
 	}

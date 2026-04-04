@@ -436,18 +436,39 @@ namespace sfh
 	{
 		FontQueryRequest request;
 		request.set_version(1);
-		request.set_allocated_feedbackdata(&feedback);
+		request.set_allocated_feedbackdata(new FontLoadFeedback(feedback));
 
-		MakeRequest<void>(request);
-
-		auto _ = request.release_feedbackdata();
+		try
+		{
+			MakeRequest<void>(request);
+		}
+		catch (...)
+		{
+			delete request.release_feedbackdata();
+			throw;
+		}
+		delete request.release_feedbackdata();
 	}
 
 	void SendFeedbackAsync(FontLoadFeedback&& feedback)
 	{
 		std::thread([fb = std::move(feedback)]()mutable
 		{
-			SendFeedback(fb);
+			try
+			{
+				SendFeedback(fb);
+			}
+			catch (std::exception& e)
+			{
+				EventLog::GetInstance().LogDllQueryFailure(
+					GetCurrentProcessId(),
+					GetCurrentThreadId(),
+					L"<feedback>",
+					AnsiStringToWideString(e.what()).c_str());
+			}
+			catch (...)
+			{
+			}
 		}).detach();
 	}
 

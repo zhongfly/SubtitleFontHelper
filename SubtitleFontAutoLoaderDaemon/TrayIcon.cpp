@@ -5,10 +5,13 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <CommCtrl.h>
 #include <shellapi.h>
 #include <strsafe.h>
 #include <wil/win32_helpers.h>
 #include <wil/resource.h>
+
+#pragma comment(lib, "Comctl32.lib")
 
 class sfh::SystemTray::Implementation
 {
@@ -17,9 +20,14 @@ private:
 	constexpr static UINT WM_UPDATE_TRAY_ICON_MESSAGE = WM_USER + 1;
 	constexpr static UINT WM_FONT_UI_DATA_CHANGED = WM_USER + 2;
 	constexpr static UINT_PTR TRAY_REFRESH_TIMER_ID = 1;
+	constexpr static UINT_PTR FONTS_SEARCH_DEBOUNCE_TIMER_ID = 2;
+	static constexpr auto FONTS_SEARCH_DEBOUNCE_INTERVAL_MS = 200;
 	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
 	static constexpr wchar_t TRAY_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonTray";
 	static constexpr wchar_t TOOL_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonToolWindow";
+	static constexpr int IDC_FONTS_SEARCH_EDIT = 1001;
+	static constexpr int IDC_FONTS_INDEX_LIST = 1002;
+	static constexpr int IDC_FONTS_RESULT_LIST = 1003;
 
 	enum class ToolWindowKind
 	{
@@ -39,7 +47,10 @@ private:
 	HWND m_fontsWindow = nullptr;
 	HWND m_logsWindow = nullptr;
 	HWND m_fontsStatusLabel = nullptr;
-	HWND m_fontsContentEdit = nullptr;
+	HWND m_fontsSearchEdit = nullptr;
+	HWND m_fontsSearchSummaryLabel = nullptr;
+	HWND m_fontsIndexListView = nullptr;
+	HWND m_fontsResultListView = nullptr;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
@@ -172,6 +183,11 @@ private:
 
 	void SetupMessageWindow()
 	{
+		INITCOMMONCONTROLSEX commonControls{};
+		commonControls.dwSize = sizeof(commonControls);
+		commonControls.dwICC = ICC_LISTVIEW_CLASSES;
+		InitCommonControlsEx(&commonControls);
+
 		WNDCLASSW wndClass;
 		RtlZeroMemory(&wndClass, sizeof(wndClass));
 		wndClass.lpfnWndProc = WindowProc;
@@ -368,10 +384,6 @@ private:
 			&createParams);
 		THROW_LAST_ERROR_IF(handle == nullptr);
 		SetForegroundWindow(handle);
-		if (kind == ToolWindowKind::Fonts)
-		{
-			RefreshFontsWindowContent();
-		}
 	}
 
 	void DestroyToolWindow(HWND& handle)
@@ -386,55 +398,227 @@ private:
 		DestroyWindow(window);
 	}
 
+	static void ConfigureListViewColumn(HWND listView, int index, int width, const wchar_t* text)
+	{
+		LVCOLUMNW column{};
+		column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+		column.pszText = const_cast<wchar_t*>(text);
+		column.cx = width;
+		column.iSubItem = index;
+		ListView_InsertColumn(listView, index, &column);
+	}
+
+	static HWND CreateFontsListView(HWND parent, int controlId, int x, int y, int width, int height)
+	{
+		HWND listView = CreateWindowExW(
+			WS_EX_CLIENTEDGE,
+			WC_LISTVIEWW,
+			L"",
+			WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+			x,
+			y,
+			width,
+			height,
+			parent,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		if (listView != nullptr)
+		{
+			ListView_SetExtendedListViewStyle(
+				listView,
+				LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES);
+			auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+			SendMessageW(listView, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+		}
+		return listView;
+	}
+
+	void SetupFontsWindowControls(HWND hWnd)
+	{
+		auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+		m_fontsStatusLabel = CreateWindowExW(
+			0,
+			L"STATIC",
+			L"",
+			WS_CHILD | WS_VISIBLE | SS_LEFT,
+			16,
+			16,
+			700,
+			20,
+			hWnd,
+			nullptr,
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		m_fontsIndexListView = CreateFontsListView(hWnd, IDC_FONTS_INDEX_LIST, 16, 44, 700, 130);
+		m_fontsSearchEdit = CreateWindowExW(
+			WS_EX_CLIENTEDGE,
+			L"EDIT",
+			L"",
+			WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+			16,
+			190,
+			700,
+			24,
+			hWnd,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_FONTS_SEARCH_EDIT)),
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		m_fontsSearchSummaryLabel = CreateWindowExW(
+			0,
+			L"STATIC",
+			L"输入字体名称进行搜索。",
+			WS_CHILD | WS_VISIBLE | SS_LEFT,
+			16,
+			222,
+			700,
+			20,
+			hWnd,
+			nullptr,
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+		m_fontsResultListView = CreateFontsListView(hWnd, IDC_FONTS_RESULT_LIST, 16, 248, 700, 190);
+
+		if (m_fontsStatusLabel != nullptr)
+		{
+			SendMessageW(m_fontsStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+		}
+		if (m_fontsSearchEdit != nullptr)
+		{
+			SendMessageW(m_fontsSearchEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+		}
+		if (m_fontsSearchSummaryLabel != nullptr)
+		{
+			SendMessageW(m_fontsSearchSummaryLabel, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+		}
+
+		if (m_fontsIndexListView != nullptr)
+		{
+			ConfigureListViewColumn(m_fontsIndexListView, 0, 260, L"Index");
+			ConfigureListViewColumn(m_fontsIndexListView, 1, 90, L"Files");
+			ConfigureListViewColumn(m_fontsIndexListView, 2, 90, L"Names");
+		}
+		if (m_fontsResultListView != nullptr)
+		{
+			ConfigureListViewColumn(m_fontsResultListView, 0, 180, L"Display");
+			ConfigureListViewColumn(m_fontsResultListView, 1, 180, L"Family");
+			ConfigureListViewColumn(m_fontsResultListView, 2, 180, L"Full");
+			ConfigureListViewColumn(m_fontsResultListView, 3, 180, L"PostScript");
+			ConfigureListViewColumn(m_fontsResultListView, 4, 80, L"Face");
+			ConfigureListViewColumn(m_fontsResultListView, 5, 220, L"Index");
+			ConfigureListViewColumn(m_fontsResultListView, 6, 260, L"Path");
+		}
+	}
+
+	void LayoutFontsWindowControls(int clientWidth, int clientHeight)
+	{
+		if (m_fontsStatusLabel == nullptr
+			|| m_fontsSearchEdit == nullptr
+			|| m_fontsSearchSummaryLabel == nullptr
+			|| m_fontsIndexListView == nullptr
+			|| m_fontsResultListView == nullptr)
+		{
+			return;
+		}
+
+		const int left = 16;
+		const int right = 16;
+		const int top = 16;
+		const int availableWidth = (std::max)(320, clientWidth - left - right);
+		const int indexHeight = 130;
+		const int searchEditTop = top + 28 + indexHeight + 16;
+		const int resultTop = searchEditTop + 58;
+		const int resultHeight = (std::max)(120, clientHeight - resultTop - 16);
+
+		MoveWindow(m_fontsStatusLabel, left, top, availableWidth, 20, TRUE);
+		MoveWindow(m_fontsIndexListView, left, top + 28, availableWidth, indexHeight, TRUE);
+		MoveWindow(m_fontsSearchEdit, left, searchEditTop, availableWidth, 24, TRUE);
+		MoveWindow(m_fontsSearchSummaryLabel, left, searchEditTop + 32, availableWidth, 20, TRUE);
+		MoveWindow(m_fontsResultListView, left, resultTop, availableWidth, resultHeight, TRUE);
+
+		ListView_SetColumnWidth(m_fontsIndexListView, 0, (std::max)(180, availableWidth * 35 / 100));
+		ListView_SetColumnWidth(m_fontsIndexListView, 1, (std::max)(90, availableWidth * 15 / 100));
+		ListView_SetColumnWidth(m_fontsIndexListView, 2, (std::max)(90, availableWidth * 15 / 100));
+
+		ListView_SetColumnWidth(m_fontsResultListView, 0, 120);
+		ListView_SetColumnWidth(m_fontsResultListView, 1, 110);
+		ListView_SetColumnWidth(m_fontsResultListView, 2, 110);
+		ListView_SetColumnWidth(m_fontsResultListView, 3, 110);
+		ListView_SetColumnWidth(m_fontsResultListView, 4, 55);
+		ListView_SetColumnWidth(m_fontsResultListView, 5, (std::max)(120, availableWidth * 22 / 100));
+		ListView_SetColumnWidth(m_fontsResultListView, 6, (std::max)(160, availableWidth * 28 / 100));
+	}
+
+	static void SetListViewRowText(HWND listView, int rowIndex, int columnIndex, const std::wstring& text)
+	{
+		ListView_SetItemText(listView, rowIndex, columnIndex, const_cast<wchar_t*>(text.c_str()));
+	}
+
+	void PopulateFontsIndexList(const FontUiSnapshot& snapshot)
+	{
+		if (m_fontsIndexListView == nullptr)
+		{
+			return;
+		}
+
+		ListView_DeleteAllItems(m_fontsIndexListView);
+		for (size_t i = 0; i < snapshot.m_indexSummaries.size(); ++i)
+		{
+			const auto& summary = snapshot.m_indexSummaries[i];
+			LVITEMW item{};
+			item.mask = LVIF_TEXT;
+			item.iItem = static_cast<int>(i);
+			item.pszText = const_cast<wchar_t*>(summary.m_indexPath.c_str());
+			ListView_InsertItem(m_fontsIndexListView, &item);
+			SetListViewRowText(m_fontsIndexListView, static_cast<int>(i), 1, std::to_wstring(summary.m_fontFileCount));
+			SetListViewRowText(m_fontsIndexListView, static_cast<int>(i), 2, std::to_wstring(summary.m_fontNameCount));
+		}
+	}
+
+	void PopulateFontsResultList(const FontUiSnapshot& snapshot)
+	{
+		if (m_fontsResultListView == nullptr)
+		{
+			return;
+		}
+
+		ListView_DeleteAllItems(m_fontsResultListView);
+		for (size_t i = 0; i < snapshot.m_searchResults.size(); ++i)
+		{
+			const auto& result = snapshot.m_searchResults[i];
+			LVITEMW item{};
+			item.mask = LVIF_TEXT;
+			item.iItem = static_cast<int>(i);
+			item.pszText = const_cast<wchar_t*>(result.m_displayName.c_str());
+			ListView_InsertItem(m_fontsResultListView, &item);
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 1, result.m_familyNames);
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 2, result.m_fullNames);
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 3, result.m_postScriptNames);
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 4, std::to_wstring(result.m_faceIndex));
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 5, result.m_indexPath);
+			SetListViewRowText(m_fontsResultListView, static_cast<int>(i), 6, result.m_fontPath);
+		}
+	}
+
 	LRESULT HandleToolWindowMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
-		(void)wParam;
 		switch (uMsg)
 		{
 		case WM_CREATE:
 		{
 			auto create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
 			auto createParams = reinterpret_cast<const ToolWindowCreateParams*>(create->lpCreateParams);
-			auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 			if (createParams != nullptr && createParams->m_kind == ToolWindowKind::Fonts)
 			{
-				m_fontsStatusLabel = CreateWindowExW(
-					0,
-					L"STATIC",
-					L"",
-					WS_CHILD | WS_VISIBLE | SS_LEFT,
-					16,
-					16,
-					660,
-					24,
-					hWnd,
-					nullptr,
-					wil::GetModuleInstanceHandle(),
-					nullptr);
-				m_fontsContentEdit = CreateWindowExW(
-					WS_EX_CLIENTEDGE,
-					L"EDIT",
-					L"",
-					WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
-					16,
-					48,
-					672,
-					256,
-					hWnd,
-					nullptr,
-					wil::GetModuleInstanceHandle(),
-					nullptr);
-				if (m_fontsStatusLabel != nullptr)
-				{
-					SendMessageW(m_fontsStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-				}
-				if (m_fontsContentEdit != nullptr)
-				{
-					SendMessageW(m_fontsContentEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-				}
+				SetupFontsWindowControls(hWnd);
+				RECT clientRect{};
+				GetClientRect(hWnd, &clientRect);
+				LayoutFontsWindowControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+				RefreshFontsWindowContent();
 			}
 			else
 			{
+				auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 				HWND label = CreateWindowExW(
 					0,
 					L"STATIC",
@@ -455,7 +639,36 @@ private:
 			}
 			return 0;
 		}
+		case WM_SIZE:
+			if (hWnd == m_fontsWindow)
+			{
+				LayoutFontsWindowControls(LOWORD(lParam), HIWORD(lParam));
+				return 0;
+			}
+			break;
+		case WM_COMMAND:
+			if (hWnd == m_fontsWindow
+				&& LOWORD(wParam) == IDC_FONTS_SEARCH_EDIT
+				&& HIWORD(wParam) == EN_CHANGE)
+			{
+				KillTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID);
+				SetTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID, FONTS_SEARCH_DEBOUNCE_INTERVAL_MS, nullptr);
+				return 0;
+			}
+			break;
+		case WM_TIMER:
+			if (hWnd == m_fontsWindow && wParam == FONTS_SEARCH_DEBOUNCE_TIMER_ID)
+			{
+				KillTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID);
+				RefreshFontsWindowContent();
+				return 0;
+			}
+			break;
 		case WM_CLOSE:
+			if (hWnd == m_fontsWindow)
+			{
+				KillTimer(hWnd, FONTS_SEARCH_DEBOUNCE_TIMER_ID);
+			}
 			DestroyWindow(hWnd);
 			return 0;
 		case WM_NCDESTROY:
@@ -463,7 +676,10 @@ private:
 			{
 				m_fontsWindow = nullptr;
 				m_fontsStatusLabel = nullptr;
-				m_fontsContentEdit = nullptr;
+				m_fontsSearchEdit = nullptr;
+				m_fontsSearchSummaryLabel = nullptr;
+				m_fontsIndexListView = nullptr;
+				m_fontsResultListView = nullptr;
 			}
 			else if (hWnd == m_logsWindow)
 			{
@@ -473,6 +689,8 @@ private:
 		default:
 			return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 		}
+
+		return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 	}
 
 	static void ShowContextMenu(HWND hWnd)
@@ -531,48 +749,49 @@ private:
 
 	void RefreshFontsWindowContent()
 	{
-		if (m_fontsWindow == nullptr || m_trayUiDataProvider == nullptr)
+		if (m_trayUiDataProvider == nullptr)
 		{
 			return;
 		}
 
-		auto snapshot = m_trayUiDataProvider->CaptureFontUiSnapshot(L"");
+		std::wstring query;
+		if (m_fontsSearchEdit != nullptr)
+		{
+			auto length = GetWindowTextLengthW(m_fontsSearchEdit);
+			if (length > 0)
+			{
+				std::wstring buffer(static_cast<size_t>(length) + 1, L'\0');
+				GetWindowTextW(m_fontsSearchEdit, buffer.data(), length + 1);
+				buffer.resize(static_cast<size_t>(length));
+				query = std::move(buffer);
+			}
+		}
+
+		auto snapshot = m_trayUiDataProvider->CaptureFontUiSnapshot(query);
 		if (m_fontsStatusLabel != nullptr)
 		{
 			SetWindowTextW(m_fontsStatusLabel, snapshot.m_statusMessage.c_str());
 		}
+		PopulateFontsIndexList(snapshot);
 
-		if (m_fontsContentEdit == nullptr)
+		if (m_fontsSearchSummaryLabel != nullptr)
 		{
-			return;
-		}
-
-		std::wstring content;
-		if (snapshot.m_indexSummaries.empty())
-		{
-			content = L"当前没有已加载的字体索引。";
-		}
-		else
-		{
-			for (size_t i = 0; i < snapshot.m_indexSummaries.size(); ++i)
+			if (query.empty())
 			{
-				const auto& summary = snapshot.m_indexSummaries[i];
-				if (i != 0)
+				SetWindowTextW(m_fontsSearchSummaryLabel, L"输入字体名称进行搜索。");
+			}
+			else
+			{
+				std::wstring summary = L"命中 " + std::to_wstring(snapshot.m_totalSearchResultCount) + L" 条结果。";
+				if (snapshot.m_isSearchResultTruncated)
 				{
-					content += L"\r\n\r\n";
+					summary += L" 结果已截断，仅显示前 500 条。";
 				}
-				content += L"索引：";
-				content += summary.m_indexPath;
-				content += L"\r\n字体文件数：";
-				content += std::to_wstring(summary.m_fontFileCount);
-				content += L"\r\n字体名称数：";
-				content += std::to_wstring(summary.m_fontNameCount);
-				content += L"\r\n名称摘要：";
-				content += summary.m_fontNamesSummary;
+				SetWindowTextW(m_fontsSearchSummaryLabel, summary.c_str());
 			}
 		}
 
-		SetWindowTextW(m_fontsContentEdit, content.c_str());
+		PopulateFontsResultList(snapshot);
 	}
 };
 

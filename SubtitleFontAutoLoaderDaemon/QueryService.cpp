@@ -16,14 +16,234 @@
 
 namespace
 {
+	struct SearchableFontEntry
+	{
+		sfh::FontSearchResult m_result;
+		std::wstring m_searchKey;
+		std::vector<std::wstring> m_indexPaths;
+		std::unordered_set<std::wstring> m_indexPathKeys;
+		std::vector<std::wstring> m_familyNames;
+		std::unordered_set<std::wstring> m_familyNameKeys;
+		std::vector<std::wstring> m_fullNames;
+		std::unordered_set<std::wstring> m_fullNameKeys;
+		std::vector<std::wstring> m_postScriptNames;
+		std::unordered_set<std::wstring> m_postScriptNameKeys;
+		std::unordered_set<std::wstring> m_searchKeyParts;
+	};
+
 	struct FontUiStore
 	{
 		sfh::FontUiSnapshot m_snapshot;
+		std::vector<SearchableFontEntry> m_searchEntries;
 	};
+
+	constexpr size_t MAX_FONT_SEARCH_RESULT_COUNT = 500;
 
 	std::wstring BuildFontUiStatusMessage(size_t indexCount)
 	{
 		return L"已加载 " + std::to_wstring(indexCount) + L" 个字体索引。";
+	}
+
+	std::wstring ToLowerCopy(std::wstring value)
+	{
+		std::transform(value.begin(), value.end(), value.begin(), towlower);
+		return value;
+	}
+
+	std::wstring JoinSortedNames(std::vector<std::wstring> names)
+	{
+		if (names.empty())
+		{
+			return {};
+		}
+
+		std::sort(names.begin(), names.end());
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+
+		std::wstring result;
+		for (size_t i = 0; i < names.size(); ++i)
+		{
+			if (i != 0)
+			{
+				result += L", ";
+			}
+			result += names[i];
+		}
+		return result;
+	}
+
+	void AppendSearchKeyPart(SearchableFontEntry& entry, const std::wstring& value)
+	{
+		auto key = ToLowerCopy(value);
+		if (key.empty() || !entry.m_searchKeyParts.insert(key).second)
+		{
+			return;
+		}
+
+		if (!entry.m_searchKey.empty())
+		{
+			entry.m_searchKey += L'\n';
+		}
+		entry.m_searchKey += key;
+	}
+
+	void AppendDisplayName(std::vector<std::wstring>& values, std::unordered_set<std::wstring>& keys, const std::wstring& value)
+	{
+		auto key = ToLowerCopy(value);
+		if (!value.empty() && keys.insert(key).second)
+		{
+			values.push_back(value);
+		}
+	}
+
+	void SyncSearchEntryResult(SearchableFontEntry& entry)
+	{
+		entry.m_result.m_familyNames = JoinSortedNames(entry.m_familyNames);
+		entry.m_result.m_fullNames = JoinSortedNames(entry.m_fullNames);
+		entry.m_result.m_postScriptNames = JoinSortedNames(entry.m_postScriptNames);
+		entry.m_result.m_indexPath = JoinSortedNames(entry.m_indexPaths);
+	}
+
+	void AppendSearchName(
+		SearchableFontEntry& entry,
+		const sfh::FontDatabase::FontFaceElement::NameElement& name)
+	{
+		AppendSearchKeyPart(entry, name.m_name);
+
+		switch (name.m_type)
+		{
+		case sfh::FontDatabase::FontFaceElement::NameElement::Win32FamilyName:
+			AppendDisplayName(entry.m_familyNames, entry.m_familyNameKeys, name.m_name);
+			break;
+		case sfh::FontDatabase::FontFaceElement::NameElement::FullName:
+			AppendDisplayName(entry.m_fullNames, entry.m_fullNameKeys, name.m_name);
+			break;
+		case sfh::FontDatabase::FontFaceElement::NameElement::PostScriptName:
+			AppendDisplayName(entry.m_postScriptNames, entry.m_postScriptNameKeys, name.m_name);
+			break;
+		}
+	}
+
+	void AppendFontMetadata(
+		SearchableFontEntry& entry,
+		const sfh::FontDatabase::FontFaceElement& font)
+	{
+		for (const auto& name : font.m_names)
+		{
+			if (!name.m_name.empty())
+			{
+				AppendSearchName(entry, name);
+			}
+		}
+
+		AppendSearchKeyPart(entry, sfh::GetManagedIndexPreferredFontName(font));
+		SyncSearchEntryResult(entry);
+	}
+
+	sfh::ManagedIndexFontLogSummary BuildNormalizedFontNameSummary(const sfh::FontDatabase& db)
+	{
+		constexpr size_t maxVisibleNames = 12;
+		constexpr size_t maxNameLength = 32;
+
+		std::vector<std::wstring> displayNames;
+		std::unordered_set<std::wstring> normalizedNames;
+		displayNames.reserve(db.m_fonts.size());
+		normalizedNames.reserve(db.m_fonts.size());
+		for (const auto& font : db.m_fonts)
+		{
+			auto displayName = sfh::GetManagedIndexPreferredFontName(font);
+			auto key = ToLowerCopy(displayName);
+			if (normalizedNames.insert(key).second)
+			{
+				displayNames.push_back(std::move(displayName));
+			}
+		}
+
+		std::sort(displayNames.begin(), displayNames.end(), [](const std::wstring& left, const std::wstring& right)
+		{
+			auto leftKey = ToLowerCopy(left);
+			auto rightKey = ToLowerCopy(right);
+			if (leftKey != rightKey)
+			{
+				return leftKey < rightKey;
+			}
+			return left < right;
+		});
+
+		sfh::ManagedIndexFontLogSummary summary;
+		summary.m_fontCount = displayNames.size();
+		if (displayNames.empty())
+		{
+			summary.m_fontNamesSummary = L"<none>";
+			return summary;
+		}
+
+		size_t visibleCount = 0;
+		for (const auto& displayName : displayNames)
+		{
+			if (visibleCount >= maxVisibleNames)
+			{
+				break;
+			}
+
+			if (!summary.m_fontNamesSummary.empty())
+			{
+				summary.m_fontNamesSummary += L", ";
+			}
+			summary.m_fontNamesSummary += sfh::TruncateManagedIndexDisplayName(displayName, maxNameLength);
+			++visibleCount;
+		}
+
+		if (visibleCount < displayNames.size())
+		{
+			summary.m_fontNamesSummary += L", ... (+" + std::to_wstring(displayNames.size() - visibleCount) + L")";
+		}
+		return summary;
+	}
+
+	SearchableFontEntry BuildSearchableFontEntry(
+		const sfh::LoadedFontDatabase& loadedDatabase,
+		const sfh::FontDatabase::FontFaceElement& font)
+	{
+		SearchableFontEntry entry;
+		entry.m_result.m_displayName = sfh::GetManagedIndexPreferredFontName(font);
+		entry.m_result.m_fontPath = font.m_path.Get();
+		entry.m_result.m_faceIndex = font.m_index;
+		entry.m_indexPaths.push_back(loadedDatabase.m_indexPath.wstring());
+		entry.m_indexPathKeys.insert(ToLowerCopy(loadedDatabase.m_indexPath.wstring()));
+		AppendFontMetadata(entry, font);
+		return entry;
+	}
+
+	void AppendIndexPath(SearchableFontEntry& entry, const std::filesystem::path& indexPath)
+	{
+		auto display = indexPath.wstring();
+		auto key = ToLowerCopy(display);
+		if (entry.m_indexPathKeys.insert(key).second)
+		{
+			entry.m_indexPaths.push_back(display);
+			SyncSearchEntryResult(entry);
+		}
+	}
+
+	void SortSearchEntries(std::vector<SearchableFontEntry>& entries)
+	{
+		std::stable_sort(entries.begin(), entries.end(), [](const SearchableFontEntry& left, const SearchableFontEntry& right)
+		{
+			if (left.m_result.m_displayName != right.m_result.m_displayName)
+			{
+				return left.m_result.m_displayName < right.m_result.m_displayName;
+			}
+			if (left.m_result.m_indexPath != right.m_result.m_indexPath)
+			{
+				return left.m_result.m_indexPath < right.m_result.m_indexPath;
+			}
+			if (left.m_result.m_fontPath != right.m_result.m_fontPath)
+			{
+				return left.m_result.m_fontPath < right.m_result.m_fontPath;
+			}
+			return left.m_result.m_faceIndex < right.m_result.m_faceIndex;
+		});
 	}
 
 	sfh::FontUiSnapshot BuildInitialFontUiSnapshot()
@@ -44,27 +264,26 @@ namespace
 		}
 
 		std::unordered_set<std::wstring> uniquePaths;
-		std::unordered_set<std::wstring> uniqueNames;
 		uniquePaths.reserve(loadedDatabase.m_database->m_fonts.size());
-		uniqueNames.reserve(loadedDatabase.m_database->m_fonts.size());
 		for (const auto& font : loadedDatabase.m_database->m_fonts)
 		{
 			if (!font.m_path.empty())
 			{
-				uniquePaths.insert(font.m_path.Get());
+				uniquePaths.insert(ToLowerCopy(font.m_path.Get()));
 			}
-			uniqueNames.insert(sfh::GetManagedIndexPreferredFontName(font));
 		}
 
+		auto normalizedNameSummary = BuildNormalizedFontNameSummary(*loadedDatabase.m_database);
 		summary.m_fontFileCount = uniquePaths.size();
-		summary.m_fontNameCount = uniqueNames.size();
-		summary.m_fontNamesSummary = sfh::BuildManagedIndexFontLogSummary(*loadedDatabase.m_database).m_fontNamesSummary;
+		summary.m_fontNameCount = normalizedNameSummary.m_fontCount;
+		summary.m_fontNamesSummary = std::move(normalizedNameSummary.m_fontNamesSummary);
 		return summary;
 	}
 
 	std::shared_ptr<const FontUiStore> BuildFontUiStore(const std::vector<sfh::LoadedFontDatabase>& loadedDatabases)
 	{
 		auto store = std::make_shared<FontUiStore>();
+		std::unordered_map<std::wstring, size_t> faceToEntryIndex;
 		store->m_snapshot.m_isLoaded = true;
 		store->m_snapshot.m_hasStaleData = false;
 		store->m_snapshot.m_statusMessage = BuildFontUiStatusMessage(loadedDatabases.size());
@@ -72,7 +291,28 @@ namespace
 		for (const auto& loadedDatabase : loadedDatabases)
 		{
 			store->m_snapshot.m_indexSummaries.push_back(BuildFontIndexSummary(loadedDatabase));
+			if (loadedDatabase.m_database != nullptr)
+			{
+				for (const auto& font : loadedDatabase.m_database->m_fonts)
+				{
+					auto faceKey = ToLowerCopy(font.m_path.Get());
+					faceKey += L"\x1f";
+					faceKey += std::to_wstring(font.m_index);
+					auto existing = faceToEntryIndex.find(faceKey);
+					if (existing == faceToEntryIndex.end())
+					{
+						faceToEntryIndex.emplace(std::move(faceKey), store->m_searchEntries.size());
+						store->m_searchEntries.push_back(BuildSearchableFontEntry(loadedDatabase, font));
+					}
+					else
+					{
+						AppendIndexPath(store->m_searchEntries[existing->second], loadedDatabase.m_indexPath);
+						AppendFontMetadata(store->m_searchEntries[existing->second], font);
+					}
+				}
+			}
 		}
+		SortSearchEntries(store->m_searchEntries);
 		return store;
 	}
 
@@ -435,13 +675,40 @@ public:
 
 	FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) const
 	{
-		(void)query;
 		auto store = m_fontUiStore.load(std::memory_order_acquire);
 		if (!store)
 		{
 			return BuildInitialFontUiSnapshot();
 		}
-		return store->m_snapshot;
+
+		auto snapshot = store->m_snapshot;
+		snapshot.m_searchResults.clear();
+		snapshot.m_totalSearchResultCount = 0;
+		snapshot.m_isSearchResultTruncated = false;
+		if (query.empty())
+		{
+			return snapshot;
+		}
+
+		auto normalizedQuery = ToLowerCopy(std::wstring(query));
+		for (const auto& entry : store->m_searchEntries)
+		{
+			if (entry.m_searchKey.find(normalizedQuery) == std::wstring::npos)
+			{
+				continue;
+			}
+
+			++snapshot.m_totalSearchResultCount;
+			if (snapshot.m_searchResults.size() < MAX_FONT_SEARCH_RESULT_COUNT)
+			{
+				snapshot.m_searchResults.push_back(entry.m_result);
+			}
+			else
+			{
+				snapshot.m_isSearchResultTruncated = true;
+			}
+		}
+		return snapshot;
 	}
 
 	size_t GetPriority(const FontDatabase::FontFaceElement* face) const

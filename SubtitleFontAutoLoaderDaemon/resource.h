@@ -5,9 +5,9 @@
 #define IDR_TRAYMENU                    101
 #define IDI_TRAYICON                    102
 #define IDI_TRAYICONLOADING             103
-#define ID_TRAYICONMENU_EXIT            40001
-#define ID_TRAYICONMENULOADING_LOADING  40002
-#define ID_TRAYICONMENU_RELOAD          40003
+#define ID_TRAYICONMENU_FONTS           40001
+#define ID_TRAYICONMENU_LOGS            40002
+#define ID_TRAYICONMENU_EXIT            40003
 
 // Next default values for new objects
 // 

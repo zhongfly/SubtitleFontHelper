@@ -17,9 +17,19 @@ private:
 	constexpr static UINT WM_UPDATE_TRAY_ICON_MESSAGE = WM_USER + 1;
 	constexpr static UINT_PTR TRAY_REFRESH_TIMER_ID = 1;
 	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
+	static constexpr wchar_t TRAY_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonTray";
+	static constexpr wchar_t TOOL_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonToolWindow";
+
+	struct ToolWindowCreateParams
+	{
+		Implementation* m_owner = nullptr;
+		const wchar_t* m_text = L"";
+	};
 
 	NOTIFYICONDATAW m_iconData = {};
 	HWND m_hWnd = nullptr;
+	HWND m_fontsWindow = nullptr;
+	HWND m_logsWindow = nullptr;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
@@ -149,9 +159,20 @@ private:
 		wndClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
 		wndClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
 		wndClass.lpszMenuName = MAKEINTRESOURCEW(IDR_TRAYMENU);
-		wndClass.lpszClassName = L"AutoLoaderDaemonTray";
+		wndClass.lpszClassName = TRAY_WINDOW_CLASS_NAME;
 
-		RegisterClassW(&wndClass);
+		THROW_LAST_ERROR_IF(RegisterClassW(&wndClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS);
+
+		WNDCLASSW toolWndClass;
+		RtlZeroMemory(&toolWndClass, sizeof(toolWndClass));
+		toolWndClass.lpfnWndProc = ToolWindowProc;
+		toolWndClass.hInstance = wil::GetModuleInstanceHandle();
+		toolWndClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+		toolWndClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+		toolWndClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+		toolWndClass.lpszClassName = TOOL_WINDOW_CLASS_NAME;
+
+		THROW_LAST_ERROR_IF(RegisterClassW(&toolWndClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS);
 
 		THROW_LAST_ERROR_IF(
 			CreateWindowExW(
@@ -230,6 +251,8 @@ private:
 			break;
 		case WM_CLOSE:
 			KillTimer(hWnd, TRAY_REFRESH_TIMER_ID);
+			DestroyToolWindow(m_fontsWindow);
+			DestroyToolWindow(m_logsWindow);
 			DestroyTrayIcon();
 			DestroyWindow(hWnd);
 			break;
@@ -239,19 +262,23 @@ private:
 		case WM_TRAY_ICON_MESSAGE:
 			if (lParam == WM_RBUTTONUP)
 			{
-				ShowContextMenu(hWnd, uMsg, wParam, lParam, m_startupLoading.load());
+				ShowContextMenu(hWnd);
 			}
+			return 0;
 		case WM_UPDATE_TRAY_ICON_MESSAGE:
 			SetupTrayIcon(false);
 			return 0;
 		case WM_COMMAND:
 			switch (LOWORD(wParam))
 			{
+			case ID_TRAYICONMENU_FONTS:
+				ShowFontsWindow();
+				break;
+			case ID_TRAYICONMENU_LOGS:
+				ShowLogsWindow();
+				break;
 			case ID_TRAYICONMENU_EXIT:
 				m_daemon->NotifyExit();
-				break;
-			case ID_TRAYICONMENU_RELOAD:
-				m_daemon->NotifyReload();
 				break;
 			}
 			return 0;
@@ -264,14 +291,126 @@ private:
 		return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 	}
 
-	static void ShowContextMenu(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bool loading)
+	void ShowFontsWindow()
+	{
+		ShowToolWindow(
+			m_fontsWindow,
+			L"Fonts",
+			L"Fonts 窗口占位，后续任务中会接入索引概览和字体搜索。");
+	}
+
+	void ShowLogsWindow()
+	{
+		ShowToolWindow(
+			m_logsWindow,
+			L"Logs",
+			L"Logs 窗口占位，后续任务中会接入内置日志查看器。");
+	}
+
+	void ShowToolWindow(HWND& handle, const wchar_t* title, const wchar_t* text)
+	{
+		if (handle != nullptr)
+		{
+			if (IsIconic(handle))
+			{
+				ShowWindow(handle, SW_RESTORE);
+			}
+			else
+			{
+				ShowWindow(handle, SW_SHOW);
+			}
+			SetForegroundWindow(handle);
+			return;
+		}
+
+		ToolWindowCreateParams createParams{};
+		createParams.m_owner = this;
+		createParams.m_text = text;
+
+		handle = CreateWindowExW(
+			WS_EX_TOOLWINDOW,
+			TOOL_WINDOW_CLASS_NAME,
+			title,
+			WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+			CW_USEDEFAULT,
+			CW_USEDEFAULT,
+			720,
+			360,
+			m_hWnd,
+			nullptr,
+			wil::GetModuleInstanceHandle(),
+			&createParams);
+		THROW_LAST_ERROR_IF(handle == nullptr);
+		SetForegroundWindow(handle);
+	}
+
+	void DestroyToolWindow(HWND& handle)
+	{
+		if (handle == nullptr)
+		{
+			return;
+		}
+
+		HWND window = handle;
+		handle = nullptr;
+		DestroyWindow(window);
+	}
+
+	LRESULT HandleToolWindowMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+	{
+		(void)wParam;
+		switch (uMsg)
+		{
+		case WM_CREATE:
+		{
+			auto create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+			auto createParams = reinterpret_cast<const ToolWindowCreateParams*>(create->lpCreateParams);
+			HWND label = CreateWindowExW(
+				0,
+				L"STATIC",
+				createParams != nullptr ? createParams->m_text : L"",
+				WS_CHILD | WS_VISIBLE | SS_LEFT,
+				16,
+				16,
+				660,
+				280,
+				hWnd,
+				nullptr,
+				wil::GetModuleInstanceHandle(),
+				nullptr);
+			if (label != nullptr)
+			{
+				auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+				SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+			}
+			return 0;
+		}
+		case WM_CLOSE:
+			DestroyWindow(hWnd);
+			return 0;
+		case WM_NCDESTROY:
+			if (hWnd == m_fontsWindow)
+			{
+				m_fontsWindow = nullptr;
+			}
+			else if (hWnd == m_logsWindow)
+			{
+				m_logsWindow = nullptr;
+			}
+			return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+		default:
+			return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+		}
+	}
+
+	static void ShowContextMenu(HWND hWnd)
 	{
 		POINT cursorPos;
 
 		GetCursorPos(&cursorPos);
 		SetForegroundWindow(hWnd);
 		HMENU hMenu = LoadMenuW(wil::GetModuleInstanceHandle(), MAKEINTRESOURCEW(IDR_TRAYMENU));
-		HMENU hMenu1 = GetSubMenu(hMenu, loading ? 1 : 0);
+		HMENU hMenu1 = GetSubMenu(hMenu, 0);
 		TrackPopupMenuEx(hMenu1, TPM_LEFTALIGN | TPM_RIGHTBUTTON, cursorPos.x, cursorPos.y, hWnd, nullptr);
 		DestroyMenu(hMenu);
 	}
@@ -293,6 +432,26 @@ private:
 		if (auto that = GetThisByWindow(hWnd))
 		{
 			return that->MessageHandler(hWnd, uMsg, wParam, lParam);
+		}
+
+		return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+	}
+
+	static LRESULT CALLBACK ToolWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+	{
+		if (uMsg == WM_CREATE)
+		{
+			auto create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+			auto createParams = reinterpret_cast<const ToolWindowCreateParams*>(create->lpCreateParams);
+			if (createParams != nullptr && createParams->m_owner != nullptr)
+			{
+				SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createParams->m_owner));
+			}
+		}
+
+		if (auto that = GetThisByWindow(hWnd))
+		{
+			return that->HandleToolWindowMessage(hWnd, uMsg, wParam, lParam);
 		}
 
 		return DefWindowProcW(hWnd, uMsg, wParam, lParam);

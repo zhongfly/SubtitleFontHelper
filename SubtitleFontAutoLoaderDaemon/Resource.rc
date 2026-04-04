@@ -73,12 +73,10 @@ IDR_TRAYMENU MENU
 BEGIN
     POPUP "TrayIconMenu"
     BEGIN
-        MENUITEM "Reload",                      ID_TRAYICONMENU_RELOAD
+        MENUITEM "Fonts",                       ID_TRAYICONMENU_FONTS
+        MENUITEM "Logs",                        ID_TRAYICONMENU_LOGS
+        MENUITEM SEPARATOR
         MENUITEM "Exit",                        ID_TRAYICONMENU_EXIT
-    END
-    POPUP "TrayIconMenuLoading"
-    BEGIN
-        MENUITEM "正在加载...",                ID_TRAYICONMENULOADING_LOADING, INACTIVE
     END
 END
 

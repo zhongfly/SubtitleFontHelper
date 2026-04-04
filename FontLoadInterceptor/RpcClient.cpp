@@ -638,6 +638,14 @@ namespace sfh
 			auto wstr = AnsiStringToWideString(query);
 			QueryAndLoad(wstr.c_str());
 		}
+		catch (std::exception& e)
+		{
+			EventLog::GetInstance().LogDllQueryFailure(
+				GetCurrentProcessId(),
+				GetCurrentThreadId(),
+				L"<ansi query>",
+				AnsiStringToWideString(e.what()).c_str());
+		}
 		catch (...)
 		{
 		}

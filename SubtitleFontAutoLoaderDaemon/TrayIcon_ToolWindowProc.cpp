@@ -94,8 +94,10 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			ApplyToolWindowFont(m_logsSubtitleLabel);
 			ApplyToolWindowSectionFont(m_logsContentSectionLabel);
 			ApplyToolWindowFont(m_logsScrollBottomButton);
+			ApplyToolWindowFont(m_logsAutoScrollCheck);
 			ApplyToolWindowFont(m_logsStatusLabel);
 			ApplyToolWindowFont(m_logsEdit);
+			RefreshLogsEditTheme();
 		}
 		return 0;
 	}
@@ -278,6 +280,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			m_logsScrollBottomButton = nullptr;
 			m_logsAutoScrollCheck = nullptr;
 			m_logsEdit = nullptr;
+			m_logsUsesRichEdit = false;
 		}
 		return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 	case WM_CTLCOLOREDIT:
@@ -320,7 +323,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			SetBkColor(dc, m_colors.metadataBackground);
 			return reinterpret_cast<LRESULT>(m_metadataBackgroundBrush != nullptr ? m_metadataBackgroundBrush : GetSysColorBrush(COLOR_WINDOW));
 		}
-		if (control == m_logsEdit)
+		if (control == m_logsEdit && !m_logsUsesRichEdit)
 		{
 			SetBkMode(dc, OPAQUE);
 			SetBkColor(dc, m_colors.logBackground);

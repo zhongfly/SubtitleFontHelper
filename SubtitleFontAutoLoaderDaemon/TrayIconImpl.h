@@ -11,6 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <CommCtrl.h>
+#include <Richedit.h>
 #include <shellapi.h>
 #include <strsafe.h>
 #include <wil/win32_helpers.h>
@@ -54,6 +55,10 @@ private:
 		COLORREF primaryText;
 		COLORREF secondaryText;
 		COLORREF accentText;
+		COLORREF logInfoText;
+		COLORREF logWarnText;
+		COLORREF logErrorText;
+		COLORREF logDebugText;
 		COLORREF listAltBackground;
 		COLORREF listSelectedBackground;
 		COLORREF listSelectedText;
@@ -68,6 +73,10 @@ private:
 		RGB(50, 44, 36),     // primaryText
 		RGB(102, 92, 78),    // secondaryText
 		RGB(123, 87, 43),    // accentText
+		RGB(60, 105, 60),    // logInfoText
+		RGB(160, 110, 30),   // logWarnText
+		RGB(170, 58, 40),    // logErrorText
+		RGB(94, 86, 148),    // logDebugText
 		RGB(248, 244, 237),  // listAltBackground
 		RGB(214, 224, 232),  // listSelectedBackground
 		RGB(35, 31, 26),     // listSelectedText
@@ -82,6 +91,10 @@ private:
 		RGB(220, 216, 210),  // primaryText
 		RGB(160, 155, 148),  // secondaryText
 		RGB(200, 165, 110),  // accentText
+		RGB(132, 192, 132),  // logInfoText
+		RGB(224, 188, 92),   // logWarnText
+		RGB(236, 116, 102),  // logErrorText
+		RGB(156, 144, 222),  // logDebugText
 		RGB(38, 38, 38),     // listAltBackground
 		RGB(55, 75, 105),    // listSelectedBackground
 		RGB(230, 228, 224),  // listSelectedText
@@ -120,6 +133,8 @@ private:
 	HWND m_logsScrollBottomButton = nullptr;
 	HWND m_logsEdit = nullptr;
 	HWND m_logsAutoScrollCheck = nullptr;
+	HMODULE m_richEditModule = nullptr;
+	bool m_logsUsesRichEdit = false;
 	bool m_logsAutoScrollEnabled = true;
 	HFONT m_toolWindowFont = nullptr;
 	HFONT m_toolWindowTitleFont = nullptr;
@@ -234,6 +249,11 @@ private:
 	int CalculateLogsStatusHeight(int availableWidth) const;
 	void LayoutLogsWindowControls(int clientWidth, int clientHeight);
 	void ScrollLogsEditToBottom();
+	bool EnsureRichEditModuleLoaded();
+	static COLORREF GetLogLevelColor(const ThemeColors& colors, std::wstring_view level);
+	void ApplyColorToLogsRange(size_t start, size_t length, COLORREF color);
+	void ApplyLogsRichTextFormatting(const std::wstring& contentText);
+	void RefreshLogsEditTheme();
 	static std::wstring Utf8ToWideBestEffort(std::string_view utf8);
 	static std::wstring FormatFileTimeText(const FILETIME& fileTime);
 	void ResolveLogsPath();

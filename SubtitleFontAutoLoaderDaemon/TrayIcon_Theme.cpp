@@ -72,6 +72,11 @@ void sfh::SystemTray::Implementation::RefreshThemeForOpenWindows()
 	if (m_logsWindow != nullptr)
 	{
 		ApplyDarkModeToWindow(m_logsWindow);
+		RefreshLogsEditTheme();
+		if (m_logsEdit != nullptr)
+		{
+			ApplyLogsRichTextFormatting(m_logsLastLoadedText);
+		}
 		InvalidateRect(m_logsWindow, nullptr, TRUE);
 	}
 }

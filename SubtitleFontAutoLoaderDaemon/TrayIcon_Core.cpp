@@ -68,6 +68,11 @@ sfh::SystemTray::Implementation::~Implementation()
 	{
 		DeleteObject(m_inputBackgroundBrush);
 	}
+	if (m_richEditModule != nullptr)
+	{
+		FreeLibrary(m_richEditModule);
+		m_richEditModule = nullptr;
+	}
 }
 
 void sfh::SystemTray::Implementation::Start()

@@ -1,10 +1,92 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
 
+namespace
+{
+	struct StructuredLogLineSegments
+	{
+		size_t m_levelStart = 0;
+		size_t m_levelLength = 0;
+		size_t m_sourceStart = 0;
+		size_t m_sourceLength = 0;
+		size_t m_threadStart = 0;
+		size_t m_threadLength = 0;
+		size_t m_messageStart = 0;
+		size_t m_messageLength = 0;
+	};
+
+	bool TryParseStructuredLogLine(std::wstring_view line, StructuredLogLineSegments& segments)
+	{
+		if (line.size() < 23 || line[23] != L' ')
+		{
+			return false;
+		}
+
+		size_t cursor = 24;
+		auto parseBracketedField = [&](size_t& start, size_t& length) -> bool
+		{
+			if (cursor >= line.size() || line[cursor] != L'[')
+			{
+				return false;
+			}
+
+			const size_t end = line.find(L']', cursor + 1);
+			if (end == std::wstring_view::npos)
+			{
+				return false;
+			}
+
+			start = cursor;
+			length = end - cursor + 1;
+			cursor = end + 1;
+			return true;
+		};
+
+		if (!parseBracketedField(segments.m_levelStart, segments.m_levelLength))
+		{
+			return false;
+		}
+		if (cursor >= line.size() || line[cursor] != L' ')
+		{
+			return false;
+		}
+		++cursor;
+
+		if (!parseBracketedField(segments.m_sourceStart, segments.m_sourceLength))
+		{
+			return false;
+		}
+		if (cursor >= line.size() || line[cursor] != L' ')
+		{
+			return false;
+		}
+		++cursor;
+
+		if (!parseBracketedField(segments.m_threadStart, segments.m_threadLength))
+		{
+			return false;
+		}
+
+		if (cursor < line.size())
+		{
+			if (line[cursor] != L' ')
+			{
+				return false;
+			}
+			++cursor;
+			segments.m_messageStart = cursor;
+			segments.m_messageLength = line.size() - cursor;
+		}
+
+		return true;
+	}
+}
+
 void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 {
 	const UINT dpi = GetWindowDpi(hWnd);
 	EnsureFontCacheForDpi(dpi);
+	m_logsUsesRichEdit = false;
 
 	m_logsTitleLabel = CreateWindowExW(
 		0,
@@ -86,7 +168,7 @@ void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 		nullptr);
 	m_logsEdit = CreateWindowExW(
 		WS_EX_CLIENTEDGE,
-		L"EDIT",
+		EnsureRichEditModuleLoaded() ? MSFTEDIT_CLASS : L"EDIT",
 		L"",
 		WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
 		16,
@@ -97,6 +179,26 @@ void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 		reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_VIEW_EDIT)),
 		wil::GetModuleInstanceHandle(),
 		nullptr);
+	if (m_logsEdit == nullptr && m_richEditModule != nullptr)
+	{
+		m_logsEdit = CreateWindowExW(
+			WS_EX_CLIENTEDGE,
+			L"EDIT",
+			L"",
+			WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+			16,
+			192,
+			700,
+			320,
+			hWnd,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOGS_VIEW_EDIT)),
+			wil::GetModuleInstanceHandle(),
+			nullptr);
+	}
+	else if (m_logsEdit != nullptr)
+	{
+		m_logsUsesRichEdit = (m_richEditModule != nullptr);
+	}
 	if (m_logsTitleLabel != nullptr)
 	{
 		ApplyToolWindowTitleFont(m_logsTitleLabel);
@@ -127,8 +229,20 @@ void sfh::SystemTray::Implementation::SetupLogsWindowControls(HWND hWnd)
 	if (m_logsEdit != nullptr)
 	{
 		ApplyToolWindowFont(m_logsEdit);
-		SendMessageW(m_logsEdit, EM_LIMITTEXT, 0x7FFFFFFE, 0);
+		if (m_logsUsesRichEdit)
+		{
+			SendMessageW(m_logsEdit, EM_EXLIMITTEXT, 0, 0x7FFFFFFE);
+		}
+		else
+		{
+			SendMessageW(m_logsEdit, EM_LIMITTEXT, 0x7FFFFFFE, 0);
+		}
 		SendMessageW(m_logsEdit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(10, 10));
+		if (m_logsUsesRichEdit)
+		{
+			SendMessageW(m_logsEdit, EM_SETUNDOLIMIT, 0, 0);
+			RefreshLogsEditTheme();
+		}
 	}
 }
 
@@ -225,6 +339,129 @@ void sfh::SystemTray::Implementation::ScrollLogsEditToBottom()
 	const auto length = GetWindowTextLengthW(m_logsEdit);
 	SendMessageW(m_logsEdit, EM_SETSEL, static_cast<WPARAM>(length), static_cast<LPARAM>(length));
 	SendMessageW(m_logsEdit, EM_SCROLLCARET, 0, 0);
+}
+
+bool sfh::SystemTray::Implementation::EnsureRichEditModuleLoaded()
+{
+	if (m_richEditModule != nullptr)
+	{
+		return true;
+	}
+
+	m_richEditModule = LoadLibraryW(L"Msftedit.dll");
+	return m_richEditModule != nullptr;
+}
+
+COLORREF sfh::SystemTray::Implementation::GetLogLevelColor(const ThemeColors& colors, std::wstring_view level)
+{
+	if (level == L"INFO")
+	{
+		return colors.logInfoText;
+	}
+	if (level == L"WARN")
+	{
+		return colors.logWarnText;
+	}
+	if (level == L"ERROR")
+	{
+		return colors.logErrorText;
+	}
+	if (level == L"DEBUG")
+	{
+		return colors.logDebugText;
+	}
+	return colors.primaryText;
+}
+
+void sfh::SystemTray::Implementation::ApplyColorToLogsRange(size_t start, size_t length, COLORREF color)
+{
+	if (!m_logsUsesRichEdit || m_logsEdit == nullptr || length == 0)
+	{
+		return;
+	}
+
+	CHARRANGE range{};
+	range.cpMin = static_cast<LONG>(start);
+	range.cpMax = static_cast<LONG>(start + length);
+	SendMessageW(m_logsEdit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&range));
+
+	CHARFORMAT2W format{};
+	format.cbSize = sizeof(format);
+	format.dwMask = CFM_COLOR;
+	format.crTextColor = color;
+	SendMessageW(m_logsEdit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
+}
+
+void sfh::SystemTray::Implementation::ApplyLogsRichTextFormatting(const std::wstring& contentText)
+{
+	if (!m_logsUsesRichEdit || m_logsEdit == nullptr)
+	{
+		return;
+	}
+
+	CHARRANGE originalSelection{};
+	SendMessageW(m_logsEdit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&originalSelection));
+	SendMessageW(m_logsEdit, WM_SETREDRAW, FALSE, 0);
+	RefreshLogsEditTheme();
+	ApplyColorToLogsRange(0, contentText.size(), m_colors.primaryText);
+
+	size_t lineStart = 0;
+	while (lineStart < contentText.size())
+	{
+		size_t lineEnd = contentText.find(L"\r\n", lineStart);
+		if (lineEnd == std::wstring::npos)
+		{
+			lineEnd = contentText.size();
+		}
+
+		std::wstring_view line(contentText.data() + lineStart, lineEnd - lineStart);
+		if (!line.empty() && IsLogEntryStartLine(line))
+		{
+			StructuredLogLineSegments segments{};
+			if (TryParseStructuredLogLine(line, segments))
+			{
+				ApplyColorToLogsRange(lineStart, 23, m_colors.secondaryText);
+
+				const size_t levelNameStart = segments.m_levelStart + 1;
+				const size_t levelNameLength = segments.m_levelLength >= 2 ? segments.m_levelLength - 2 : 0;
+				ApplyColorToLogsRange(
+					lineStart + segments.m_levelStart,
+					segments.m_levelLength,
+					GetLogLevelColor(
+						m_colors,
+						line.substr(levelNameStart, levelNameLength)));
+				ApplyColorToLogsRange(lineStart + segments.m_sourceStart, segments.m_sourceLength, m_colors.accentText);
+				ApplyColorToLogsRange(lineStart + segments.m_threadStart, segments.m_threadLength, m_colors.secondaryText);
+				if (segments.m_messageLength != 0)
+				{
+					ApplyColorToLogsRange(lineStart + segments.m_messageStart, segments.m_messageLength, m_colors.primaryText);
+				}
+			}
+		}
+
+		if (lineEnd == contentText.size())
+		{
+			break;
+		}
+		lineStart = lineEnd + 2;
+	}
+
+	SendMessageW(m_logsEdit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&originalSelection));
+	SendMessageW(m_logsEdit, WM_SETREDRAW, TRUE, 0);
+	InvalidateRect(m_logsEdit, nullptr, TRUE);
+}
+
+void sfh::SystemTray::Implementation::RefreshLogsEditTheme()
+{
+	if (m_logsEdit == nullptr)
+	{
+		return;
+	}
+
+	if (m_logsUsesRichEdit)
+	{
+		SendMessageW(m_logsEdit, EM_SETBKGNDCOLOR, 0, m_colors.logBackground);
+	}
 }
 
 std::wstring sfh::SystemTray::Implementation::Utf8ToWideBestEffort(std::string_view utf8)
@@ -569,6 +806,7 @@ void sfh::SystemTray::Implementation::UpdateLogsWindowText(const std::wstring& s
 	if (m_logsEdit != nullptr)
 	{
 		SetWindowTextW(m_logsEdit, contentText.c_str());
+		ApplyLogsRichTextFormatting(contentText);
 		if (scrollToBottom)
 		{
 			const auto length = GetWindowTextLengthW(m_logsEdit);

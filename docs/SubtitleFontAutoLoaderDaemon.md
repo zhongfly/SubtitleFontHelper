@@ -132,7 +132,7 @@ stateDiagram-v2
 - 启动初期显示 “Loading” 图标与提示；`OnInit()` 完成后调用 `SystemTray::NotifyFinishLoad()` 切换到常规图标。
 - 右键菜单提供 `Fonts`、`Logs` 与 `Exit`：
   - `Fonts`：打开单实例字体浏览窗口，显示当前已加载字体索引概览，并支持按 `family name`、`FullName`、`PostScriptName` 搜索字体。
-  - `Logs`：打开单实例日志查看窗口，只读显示当前 `SubtitleFontHelper.log` 主日志文件尾部；窗口打开期间每秒检查一次文件大小和最后写入时间，发生追加、截断或轮转后自动刷新。
+  - `Logs`：打开单实例日志查看窗口，使用 RichEdit 只读显示当前 `SubtitleFontHelper.log` 主日志文件尾部，并对时间、级别、来源与线程元数据做彩色高亮；窗口打开期间每秒检查一次文件大小和最后写入时间，发生追加、截断或轮转后自动刷新。
   - `Exit`：`IDaemon::NotifyExit()` → 主线程退出
 - `Fonts` 窗口通过 `SystemTray::NotifyFontUiDataChanged()` 事件驱动刷新，不轮询 `QueryService` 版本号。
 - `Logs` 窗口只显示当前主日志文件的最新片段，限制为最近 `1 MiB` 与最近 `5000` 行中的较小结果；归档文件 `SubtitleFontHelper.log.1` 到 `.5` 不在当前窗口中直接查看。

@@ -13,6 +13,7 @@
 #include "ProcessMonitor.h"
 #include "Prefetch.h"
 #include "ToastNotifier.h"
+#include "TrayUiData.h"
 #include "../FontIndexCore/FontIndexCore.h"
 
 #include <algorithm>
@@ -129,7 +130,7 @@ namespace sfh
 		}
 	};
 
-	class Daemon : public IDaemon, public IRpcRequestHandler, public IRpcFeedbackHandler
+	class Daemon : public IDaemon, public IRpcRequestHandler, public IRpcFeedbackHandler, public ITrayUiDataProvider
 	{
 	private:
 		static constexpr size_t FILE_READ_RETRY_COUNT = 3;
@@ -429,6 +430,18 @@ namespace sfh
 			m_service->m_prefetch->GetRpcFeedbackHandler()->HandleFeedback(request);
 		}
 
+		FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) override
+		{
+			std::lock_guard lg(m_serviceAccessLock);
+			if (m_service == nullptr || m_service->m_queryService == nullptr)
+			{
+				FontUiSnapshot snapshot;
+				snapshot.m_statusMessage = L"正在加载字体索引...";
+				return snapshot;
+			}
+			return m_service->m_queryService->CaptureFontUiSnapshot(query);
+		}
+
 		int DaemonMain(const std::vector<std::wstring>& cmdline)
 		{
 			std::unique_lock ul(m_queueLock);
@@ -488,9 +501,9 @@ namespace sfh
 		}
 
 	private:
-		std::vector<std::unique_ptr<FontDatabase>> LoadAvailableIndexDatabases(const Service& service)
+		std::vector<LoadedFontDatabase> LoadAvailableIndexDatabases(const Service& service)
 		{
-			std::vector<std::unique_ptr<FontDatabase>> dbs;
+			std::vector<LoadedFontDatabase> dbs;
 			dbs.reserve(service.m_indexSlots.size());
 			for (const auto& slot : service.m_indexSlots)
 			{
@@ -501,12 +514,23 @@ namespace sfh
 						continue;
 				}
 
-				dbs.emplace_back(ReadWithRetry([&]()
+				LoadedFontDatabase loadedDatabase;
+				loadedDatabase.m_indexPath = slot.m_path;
+				loadedDatabase.m_database = ReadWithRetry([&]()
 				{
 					return FontDatabase::ReadFromFile(slot.m_path);
-				}));
+				});
+				dbs.push_back(std::move(loadedDatabase));
 			}
 			return dbs;
+		}
+
+		void NotifyFontUiDataChanged()
+		{
+			if (m_systemTray != nullptr)
+			{
+				m_systemTray->NotifyFontUiDataChanged();
+			}
 		}
 
 		void UpdateManagedIndexBuildTrayState()
@@ -557,6 +581,7 @@ namespace sfh
 
 			auto dbs = LoadAvailableIndexDatabases(*m_service);
 			m_service->m_queryService->Load(std::move(dbs));
+			NotifyFontUiDataChanged();
 		}
 
 		void OnReload(const std::vector<std::wstring>& cmdline)
@@ -599,7 +624,7 @@ namespace sfh
 
 			const auto serviceGeneration = m_nextServiceGeneration++;
 			newService->m_messageSink = std::make_unique<ServiceMessageSink>(this, serviceGeneration);
-			std::vector<std::unique_ptr<FontDatabase>> dbs;
+			std::vector<LoadedFontDatabase> dbs;
 			std::vector<std::filesystem::path> watchFiles;
 			std::vector<ManagedIndexBuilder::Task> managedIndexBuildTasks;
 			std::vector<ManagedIndexWatcher::Options> managedIndexWatchOptions;
@@ -641,7 +666,10 @@ namespace sfh
 					{
 						dbs.emplace_back(ReadWithRetry([&]()
 						{
-							return FontDatabase::ReadFromFile(indexPath);
+							LoadedFontDatabase loadedDatabase;
+							loadedDatabase.m_indexPath = indexPath;
+							loadedDatabase.m_database = FontDatabase::ReadFromFile(indexPath);
+							return loadedDatabase;
 						}));
 					}
 					catch (...)
@@ -714,7 +742,7 @@ namespace sfh
 			}
 			if (m_systemTray == nullptr)
 			{
-				newSystemTray = std::make_unique<SystemTray>(this);
+				newSystemTray = std::make_unique<SystemTray>(this, this);
 			}
 			{
 				std::lock_guard lg(m_serviceAccessLock);
@@ -739,6 +767,7 @@ namespace sfh
 			}
 			UpdateManagedIndexBuildTrayState();
 			m_systemTray->NotifyFinishLoad();
+			m_systemTray->NotifyFontUiDataChanged();
 			oldService.reset();
 		}
 

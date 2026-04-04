@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "Common.h"
+#include "ManagedIndexLog.h"
 #include "QueryService.h"
 #include "RpcServer.h"
 #include "EventLog.h"
@@ -8,12 +9,73 @@
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <string_view>
 #include <set>
 #include <stdexcept>
 
 namespace
 {
+	struct FontUiStore
+	{
+		sfh::FontUiSnapshot m_snapshot;
+	};
+
+	std::wstring BuildFontUiStatusMessage(size_t indexCount)
+	{
+		return L"已加载 " + std::to_wstring(indexCount) + L" 个字体索引。";
+	}
+
+	sfh::FontUiSnapshot BuildInitialFontUiSnapshot()
+	{
+		sfh::FontUiSnapshot snapshot;
+		snapshot.m_statusMessage = L"正在加载字体索引...";
+		return snapshot;
+	}
+
+	sfh::FontIndexSummary BuildFontIndexSummary(const sfh::LoadedFontDatabase& loadedDatabase)
+	{
+		sfh::FontIndexSummary summary;
+		summary.m_indexPath = loadedDatabase.m_indexPath.wstring();
+		if (loadedDatabase.m_database == nullptr)
+		{
+			summary.m_fontNamesSummary = L"<none>";
+			return summary;
+		}
+
+		std::unordered_set<std::wstring> uniquePaths;
+		std::unordered_set<std::wstring> uniqueNames;
+		uniquePaths.reserve(loadedDatabase.m_database->m_fonts.size());
+		uniqueNames.reserve(loadedDatabase.m_database->m_fonts.size());
+		for (const auto& font : loadedDatabase.m_database->m_fonts)
+		{
+			if (!font.m_path.empty())
+			{
+				uniquePaths.insert(font.m_path.Get());
+			}
+			uniqueNames.insert(sfh::GetManagedIndexPreferredFontName(font));
+		}
+
+		summary.m_fontFileCount = uniquePaths.size();
+		summary.m_fontNameCount = uniqueNames.size();
+		summary.m_fontNamesSummary = sfh::BuildManagedIndexFontLogSummary(*loadedDatabase.m_database).m_fontNamesSummary;
+		return summary;
+	}
+
+	std::shared_ptr<const FontUiStore> BuildFontUiStore(const std::vector<sfh::LoadedFontDatabase>& loadedDatabases)
+	{
+		auto store = std::make_shared<FontUiStore>();
+		store->m_snapshot.m_isLoaded = true;
+		store->m_snapshot.m_hasStaleData = false;
+		store->m_snapshot.m_statusMessage = BuildFontUiStatusMessage(loadedDatabases.size());
+		store->m_snapshot.m_indexSummaries.reserve(loadedDatabases.size());
+		for (const auto& loadedDatabase : loadedDatabases)
+		{
+			store->m_snapshot.m_indexSummaries.push_back(BuildFontIndexSummary(loadedDatabase));
+		}
+		return store;
+	}
+
 	template <typename T, bool AllowDuplicate = true>
 	class QueryTrie
 	{
@@ -76,13 +138,10 @@ namespace
 		{
 			if (*key == 0)
 			{
-				// empty key is not allowed
 				return;
 			}
 			const wchar_t* keyPointer = key;
 			TrieNode* node = &m_rootNode;
-			// find an arc in list with common prefix of key
-			// just search first character
 			while (node)
 			{
 				if (*keyPointer == 0)
@@ -92,8 +151,6 @@ namespace
 				auto result = node->SearchPrefix(*keyPointer);
 				if (result == nullptr)
 				{
-					// not found in current list
-					// create new node in list
 					auto newNode = std::make_unique<TrieNode>();
 					newNode->m_data.push_back(value);
 					node->m_branch.emplace_back(keyPointer, std::move(newNode));
@@ -102,8 +159,6 @@ namespace
 				}
 				else
 				{
-					// found an arc with common prefix
-					// advance keyPointer
 					auto arcPointer = result->first.c_str();
 					while (*keyPointer && *arcPointer && *keyPointer == *arcPointer)
 					{
@@ -112,23 +167,18 @@ namespace
 					}
 					if (*arcPointer == 0 && *keyPointer == 0)
 					{
-						// duplicate entry
 						if constexpr (AllowDuplicate)
 						{
-							// append entry
 							result->second->m_data.push_back(value);
 						}
 						return;
 					}
 					else if (*arcPointer == 0)
 					{
-						// found key is a prefix of new key
 						node = result->second.get();
 					}
 					else if (*keyPointer == 0)
 					{
-						// new key is a prefix of found key
-						// split arc
 						auto keyLength = arcPointer - result->first.c_str();
 						auto newNode = std::make_unique<TrieNode>();
 						newNode->m_data.push_back(value);
@@ -140,8 +190,6 @@ namespace
 					}
 					else
 					{
-						// found key and new key has common part but not equal
-						// split arc
 						auto keyLength = arcPointer - result->first.c_str();
 						auto intermediateNode = std::make_unique<TrieNode>();
 						auto newNode = std::make_unique<TrieNode>();
@@ -162,14 +210,11 @@ namespace
 		{
 			if (*key == 0)
 			{
-				// empty key is not allowed
 				return {};
 			}
 			std::vector<T*> ret;
 			const wchar_t* keyPointer = key;
 			TrieNode* node = &m_rootNode;
-			// find an arc in list with common prefix of key
-			// just search first character
 			while (node)
 			{
 				if (*keyPointer == 0)
@@ -179,7 +224,6 @@ namespace
 				auto result = node->SearchPrefix(*keyPointer);
 				if (result == nullptr)
 				{
-					// not found
 					return ret;
 				}
 				else
@@ -192,7 +236,6 @@ namespace
 					}
 					if (*arcPointer == 0 && *keyPointer == 0)
 					{
-						// exact match
 						if (truncated)
 						{
 							result->second->CollectData(ret);
@@ -205,12 +248,10 @@ namespace
 					}
 					else if (*arcPointer == 0)
 					{
-						// found key is a prefix of new key
 						node = result->second.get();
 					}
 					else if (*keyPointer == 0)
 					{
-						// not found, we ran out of key
 						if (truncated)
 						{
 							result->second->CollectData(ret);
@@ -219,7 +260,6 @@ namespace
 					}
 					else
 					{
-						// not found
 						return ret;
 					}
 				}
@@ -244,7 +284,6 @@ namespace
 				auto& top = iterateStack.back();
 				if (top.nextArc == 0)
 				{
-					// first reach
 					for (size_t i = 0; i < top.node->m_data.size(); ++i)
 					{
 						wchar_t head = (i == top.node->m_data.size() - 1 && top.node->m_branch.empty()) ? L'└' : L'├';
@@ -291,6 +330,7 @@ private:
 	QueryTrie<FontDatabase::FontFaceElement, true> m_win32FamilyName;
 	std::unordered_map<const FontDatabase::FontFaceElement*, size_t> m_fontPriority;
 	std::vector<std::unique_ptr<FontDatabase>> m_dbs;
+	std::atomic<std::shared_ptr<const FontUiStore>> m_fontUiStore;
 
 	IDaemon* m_daemon;
 
@@ -315,6 +355,10 @@ public:
 			0, 0,
 			sizeof(uint32_t))));
 		THROW_LAST_ERROR_IF(m_versionMem.get() == nullptr);
+
+		m_fontUiStore.store(
+			std::shared_ptr<const FontUiStore>(std::make_shared<FontUiStore>(FontUiStore{ BuildInitialFontUiSnapshot() })),
+			std::memory_order_release);
 	}
 
 	void UpdateVerison()
@@ -323,15 +367,22 @@ public:
 		EventLog::GetInstance().LogDaemonBumpVersion(newValue - 1, newValue);
 	}
 
-	void Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, bool publishVersion)
+	void Load(std::vector<LoadedFontDatabase>&& loadedDatabases, bool publishVersion)
 	{
 		QueryTrie<FontDatabase::FontFaceElement, true> win32FamilyName;
 		QueryTrie<FontDatabase::FontFaceElement, false> fullName;
 		QueryTrie<FontDatabase::FontFaceElement, false> postScriptName;
 		std::unordered_map<const FontDatabase::FontFaceElement*, size_t> fontPriority;
-		for (size_t priority = 0; priority < dbs.size(); ++priority)
+		auto fontUiStore = BuildFontUiStore(loadedDatabases);
+		std::vector<std::unique_ptr<FontDatabase>> dbs;
+		dbs.reserve(loadedDatabases.size());
+		for (size_t priority = 0; priority < loadedDatabases.size(); ++priority)
 		{
-			auto& db = dbs[priority];
+			auto db = std::move(loadedDatabases[priority].m_database);
+			if (db == nullptr)
+			{
+				continue;
+			}
 			for (auto& font : db->m_fonts)
 			{
 				fontPriority.emplace(&font, priority);
@@ -351,6 +402,7 @@ public:
 					}
 				}
 			}
+			dbs.push_back(std::move(db));
 		}
 
 		if (g_debugOutputEnabled)
@@ -368,6 +420,7 @@ public:
 		m_fullName = std::move(fullName);
 		m_postScriptName = std::move(postScriptName);
 		m_fontPriority = std::move(fontPriority);
+		m_fontUiStore.store(std::move(fontUiStore), std::memory_order_release);
 		if (publishVersion)
 		{
 			UpdateVerison();
@@ -378,6 +431,17 @@ public:
 	{
 		std::lock_guard lg(m_accessLock);
 		UpdateVerison();
+	}
+
+	FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) const
+	{
+		(void)query;
+		auto store = m_fontUiStore.load(std::memory_order_acquire);
+		if (!store)
+		{
+			return BuildInitialFontUiSnapshot();
+		}
+		return store->m_snapshot;
 	}
 
 	size_t GetPriority(const FontDatabase::FontFaceElement* face) const
@@ -511,7 +575,6 @@ public:
 		FontQueryResponse ret;
 		std::wstring queryString = Utf8ToWideString(request.querystring());
 		bool doTruncated = false;
-		// enable truncated query for GDI LOGFONT::lfFaceName's 31 wchar_t limit
 		if (queryString.size() == 31)
 			doTruncated = true;
 		std::vector<std::pair<std::wstring_view, uint32_t>> dedup;
@@ -522,12 +585,10 @@ public:
 		RetainDistinctFamilyFaces(family);
 		if (!family.empty())
 		{
-			// if it's a valid family name, return the list
 			AppendFontFace(ret, family, dedup);
 			return ret;
 		}
-		// This RPC only preloads candidates for later GDI/libass resolution,
-		// so it must return the superset from both name namespaces here.
+
 		auto postscript = m_postScriptName.QueryEntry(queryString.c_str(), doTruncated);
 		auto fullname = m_fullName.QueryEntry(queryString.c_str(), doTruncated);
 		auto highestPriority = GetHighestPriority(postscript, fullname);
@@ -554,7 +615,7 @@ sfh::QueryService::QueryService(IDaemon* daemon)
 
 sfh::QueryService::~QueryService() = default;
 
-void sfh::QueryService::Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, bool publishVersion)
+void sfh::QueryService::Load(std::vector<LoadedFontDatabase>&& dbs, bool publishVersion)
 {
 	m_impl->Load(std::move(dbs), publishVersion);
 }
@@ -562,6 +623,11 @@ void sfh::QueryService::Load(std::vector<std::unique_ptr<FontDatabase>>&& dbs, b
 void sfh::QueryService::PublishVersion()
 {
 	m_impl->PublishVersion();
+}
+
+sfh::FontUiSnapshot sfh::QueryService::CaptureFontUiSnapshot(std::wstring_view query) const
+{
+	return m_impl->CaptureFontUiSnapshot(query);
 }
 
 sfh::IRpcRequestHandler* sfh::QueryService::GetRpcRequestHandler()

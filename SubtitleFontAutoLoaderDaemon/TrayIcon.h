@@ -4,6 +4,7 @@
 
 #include "IDaemon.h"
 #include "ManagedIndexProgress.h"
+#include "TrayUiData.h"
 
 namespace sfh
 {
@@ -13,7 +14,7 @@ namespace sfh
 		class Implementation;
 		std::unique_ptr<Implementation> m_impl;
 	public:
-		SystemTray(IDaemon* daemon);
+		SystemTray(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider);
 		~SystemTray();
 
 		SystemTray(const SystemTray&) = delete;
@@ -25,5 +26,6 @@ namespace sfh
 		void Start();
 		void SetManagedIndexTrayProgress(const ManagedIndexTrayProgressSnapshot& snapshot);
 		void NotifyFinishLoad();
+		void NotifyFontUiDataChanged();
 	};
 }

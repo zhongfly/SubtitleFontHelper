@@ -255,6 +255,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="RpcServer.h" />
     <ClInclude Include="ToastNotifier.h" />
+    <ClInclude Include="TrayUiData.h" />
     <ClInclude Include="TrayIcon.h" />
   </ItemGroup>
   <ItemGroup>

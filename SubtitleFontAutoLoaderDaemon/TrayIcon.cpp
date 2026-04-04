@@ -15,14 +15,22 @@ class sfh::SystemTray::Implementation
 private:
 	constexpr static UINT WM_TRAY_ICON_MESSAGE = WM_USER;
 	constexpr static UINT WM_UPDATE_TRAY_ICON_MESSAGE = WM_USER + 1;
+	constexpr static UINT WM_FONT_UI_DATA_CHANGED = WM_USER + 2;
 	constexpr static UINT_PTR TRAY_REFRESH_TIMER_ID = 1;
 	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
 	static constexpr wchar_t TRAY_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonTray";
 	static constexpr wchar_t TOOL_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonToolWindow";
 
+	enum class ToolWindowKind
+	{
+		Fonts = 0,
+		Logs
+	};
+
 	struct ToolWindowCreateParams
 	{
 		Implementation* m_owner = nullptr;
+		ToolWindowKind m_kind = ToolWindowKind::Fonts;
 		const wchar_t* m_text = L"";
 	};
 
@@ -30,9 +38,12 @@ private:
 	HWND m_hWnd = nullptr;
 	HWND m_fontsWindow = nullptr;
 	HWND m_logsWindow = nullptr;
+	HWND m_fontsStatusLabel = nullptr;
+	HWND m_fontsContentEdit = nullptr;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
+	ITrayUiDataProvider* m_trayUiDataProvider;
 	std::atomic<size_t> m_checkPoint = 0;
 
 	std::atomic<bool> m_startupLoading = true;
@@ -44,8 +55,9 @@ private:
 	std::atomic<bool> m_exitRequested = false;
 	wil::unique_event m_startEvent;
 public:
-	Implementation(IDaemon* daemon)
-		: m_daemon(daemon)
+	Implementation(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider)
+		: m_daemon(daemon),
+		  m_trayUiDataProvider(trayUiDataProvider)
 	{
 		m_startEvent.create(wil::EventOptions::ManualReset);
 		m_trayThread = std::thread([&]()
@@ -100,6 +112,14 @@ public:
 		m_startupLoading = false;
 		if (m_hWnd != nullptr)
 			PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
+	}
+
+	void NotifyFontUiDataChanged()
+	{
+		if (m_hWnd != nullptr)
+		{
+			PostMessageW(m_hWnd, WM_FONT_UI_DATA_CHANGED, 0, 0);
+		}
 	}
 
 private:
@@ -268,6 +288,9 @@ private:
 		case WM_UPDATE_TRAY_ICON_MESSAGE:
 			SetupTrayIcon(false);
 			return 0;
+		case WM_FONT_UI_DATA_CHANGED:
+			RefreshFontsWindowContent();
+			return 0;
 		case WM_COMMAND:
 			switch (LOWORD(wParam))
 			{
@@ -295,19 +318,21 @@ private:
 	{
 		ShowToolWindow(
 			m_fontsWindow,
+			ToolWindowKind::Fonts,
 			L"Fonts",
-			L"Fonts 窗口占位，后续任务中会接入索引概览和字体搜索。");
+			L"");
 	}
 
 	void ShowLogsWindow()
 	{
 		ShowToolWindow(
 			m_logsWindow,
+			ToolWindowKind::Logs,
 			L"Logs",
 			L"Logs 窗口占位，后续任务中会接入内置日志查看器。");
 	}
 
-	void ShowToolWindow(HWND& handle, const wchar_t* title, const wchar_t* text)
+	void ShowToolWindow(HWND& handle, ToolWindowKind kind, const wchar_t* title, const wchar_t* text)
 	{
 		if (handle != nullptr)
 		{
@@ -325,6 +350,7 @@ private:
 
 		ToolWindowCreateParams createParams{};
 		createParams.m_owner = this;
+		createParams.m_kind = kind;
 		createParams.m_text = text;
 
 		handle = CreateWindowExW(
@@ -342,6 +368,10 @@ private:
 			&createParams);
 		THROW_LAST_ERROR_IF(handle == nullptr);
 		SetForegroundWindow(handle);
+		if (kind == ToolWindowKind::Fonts)
+		{
+			RefreshFontsWindowContent();
+		}
 	}
 
 	void DestroyToolWindow(HWND& handle)
@@ -365,23 +395,63 @@ private:
 		{
 			auto create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
 			auto createParams = reinterpret_cast<const ToolWindowCreateParams*>(create->lpCreateParams);
-			HWND label = CreateWindowExW(
-				0,
-				L"STATIC",
-				createParams != nullptr ? createParams->m_text : L"",
-				WS_CHILD | WS_VISIBLE | SS_LEFT,
-				16,
-				16,
-				660,
-				280,
-				hWnd,
-				nullptr,
-				wil::GetModuleInstanceHandle(),
-				nullptr);
-			if (label != nullptr)
+			auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+			if (createParams != nullptr && createParams->m_kind == ToolWindowKind::Fonts)
 			{
-				auto font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-				SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+				m_fontsStatusLabel = CreateWindowExW(
+					0,
+					L"STATIC",
+					L"",
+					WS_CHILD | WS_VISIBLE | SS_LEFT,
+					16,
+					16,
+					660,
+					24,
+					hWnd,
+					nullptr,
+					wil::GetModuleInstanceHandle(),
+					nullptr);
+				m_fontsContentEdit = CreateWindowExW(
+					WS_EX_CLIENTEDGE,
+					L"EDIT",
+					L"",
+					WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+					16,
+					48,
+					672,
+					256,
+					hWnd,
+					nullptr,
+					wil::GetModuleInstanceHandle(),
+					nullptr);
+				if (m_fontsStatusLabel != nullptr)
+				{
+					SendMessageW(m_fontsStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+				}
+				if (m_fontsContentEdit != nullptr)
+				{
+					SendMessageW(m_fontsContentEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+				}
+			}
+			else
+			{
+				HWND label = CreateWindowExW(
+					0,
+					L"STATIC",
+					createParams != nullptr ? createParams->m_text : L"",
+					WS_CHILD | WS_VISIBLE | SS_LEFT,
+					16,
+					16,
+					660,
+					280,
+					hWnd,
+					nullptr,
+					wil::GetModuleInstanceHandle(),
+					nullptr);
+				if (label != nullptr)
+				{
+					SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+				}
 			}
 			return 0;
 		}
@@ -392,6 +462,8 @@ private:
 			if (hWnd == m_fontsWindow)
 			{
 				m_fontsWindow = nullptr;
+				m_fontsStatusLabel = nullptr;
+				m_fontsContentEdit = nullptr;
 			}
 			else if (hWnd == m_logsWindow)
 			{
@@ -456,10 +528,56 @@ private:
 
 		return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 	}
+
+	void RefreshFontsWindowContent()
+	{
+		if (m_fontsWindow == nullptr || m_trayUiDataProvider == nullptr)
+		{
+			return;
+		}
+
+		auto snapshot = m_trayUiDataProvider->CaptureFontUiSnapshot(L"");
+		if (m_fontsStatusLabel != nullptr)
+		{
+			SetWindowTextW(m_fontsStatusLabel, snapshot.m_statusMessage.c_str());
+		}
+
+		if (m_fontsContentEdit == nullptr)
+		{
+			return;
+		}
+
+		std::wstring content;
+		if (snapshot.m_indexSummaries.empty())
+		{
+			content = L"当前没有已加载的字体索引。";
+		}
+		else
+		{
+			for (size_t i = 0; i < snapshot.m_indexSummaries.size(); ++i)
+			{
+				const auto& summary = snapshot.m_indexSummaries[i];
+				if (i != 0)
+				{
+					content += L"\r\n\r\n";
+				}
+				content += L"索引：";
+				content += summary.m_indexPath;
+				content += L"\r\n字体文件数：";
+				content += std::to_wstring(summary.m_fontFileCount);
+				content += L"\r\n字体名称数：";
+				content += std::to_wstring(summary.m_fontNameCount);
+				content += L"\r\n名称摘要：";
+				content += summary.m_fontNamesSummary;
+			}
+		}
+
+		SetWindowTextW(m_fontsContentEdit, content.c_str());
+	}
 };
 
-sfh::SystemTray::SystemTray(IDaemon* daemon)
-	: m_impl(std::make_unique<Implementation>(daemon))
+sfh::SystemTray::SystemTray(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider)
+	: m_impl(std::make_unique<Implementation>(daemon, trayUiDataProvider))
 {
 }
 
@@ -478,4 +596,9 @@ void sfh::SystemTray::SetManagedIndexTrayProgress(const ManagedIndexTrayProgress
 void sfh::SystemTray::NotifyFinishLoad()
 {
 	m_impl->NotifyFinishLoad();
+}
+
+void sfh::SystemTray::NotifyFontUiDataChanged()
+{
+	m_impl->NotifyFontUiDataChanged();
 }

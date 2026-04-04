@@ -2,6 +2,7 @@
 
 #include "Common.h"
 #include "ProcessMonitor.h"
+#include "EventLog.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -383,8 +384,15 @@ private:
 				auto snapshot = GetConfigSnapshot(eventRecord.m_revision);
 				HandleProcessCreation(eventRecord.m_object.get(), wbemService.get(), snapshot.m_list);
 			}
+			catch (std::exception& e)
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					"HandleProcessCreation failed: %s", e.what());
+			}
 			catch (...)
 			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"HandleProcessCreation failed: unknown exception");
 			}
 		}
 

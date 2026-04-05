@@ -373,7 +373,11 @@ COLORREF sfh::SystemTray::Implementation::GetLogLevelColor(const ThemeColors& co
 	return colors.primaryText;
 }
 
-void sfh::SystemTray::Implementation::ApplyColorToLogsRange(size_t start, size_t length, COLORREF color)
+void sfh::SystemTray::Implementation::ApplyCharacterFormatToLogsRange(
+	size_t start,
+	size_t length,
+	COLORREF color,
+	DWORD effects)
 {
 	if (!m_logsUsesRichEdit || m_logsEdit == nullptr || length == 0)
 	{
@@ -387,7 +391,8 @@ void sfh::SystemTray::Implementation::ApplyColorToLogsRange(size_t start, size_t
 
 	CHARFORMAT2W format{};
 	format.cbSize = sizeof(format);
-	format.dwMask = CFM_COLOR;
+	format.dwMask = CFM_COLOR | CFM_BOLD;
+	format.dwEffects = effects;
 	format.crTextColor = color;
 	SendMessageW(m_logsEdit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
 }
@@ -403,7 +408,7 @@ void sfh::SystemTray::Implementation::ApplyLogsRichTextFormatting(const std::wst
 	SendMessageW(m_logsEdit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&originalSelection));
 	SendMessageW(m_logsEdit, WM_SETREDRAW, FALSE, 0);
 	RefreshLogsEditTheme();
-	ApplyColorToLogsRange(0, contentText.size(), m_colors.primaryText);
+	ApplyCharacterFormatToLogsRange(0, contentText.size(), m_colors.logMessageText);
 
 	size_t lineStart = 0;
 	while (lineStart < contentText.size())
@@ -420,21 +425,32 @@ void sfh::SystemTray::Implementation::ApplyLogsRichTextFormatting(const std::wst
 			StructuredLogLineSegments segments{};
 			if (TryParseStructuredLogLine(line, segments))
 			{
-				ApplyColorToLogsRange(lineStart, 23, m_colors.secondaryText);
+				ApplyCharacterFormatToLogsRange(lineStart, 23, m_colors.logTimestampText);
 
 				const size_t levelNameStart = segments.m_levelStart + 1;
 				const size_t levelNameLength = segments.m_levelLength >= 2 ? segments.m_levelLength - 2 : 0;
-				ApplyColorToLogsRange(
+				ApplyCharacterFormatToLogsRange(
 					lineStart + segments.m_levelStart,
 					segments.m_levelLength,
 					GetLogLevelColor(
 						m_colors,
-						line.substr(levelNameStart, levelNameLength)));
-				ApplyColorToLogsRange(lineStart + segments.m_sourceStart, segments.m_sourceLength, m_colors.accentText);
-				ApplyColorToLogsRange(lineStart + segments.m_threadStart, segments.m_threadLength, m_colors.secondaryText);
+						line.substr(levelNameStart, levelNameLength)),
+					CFE_BOLD);
+				ApplyCharacterFormatToLogsRange(
+					lineStart + segments.m_sourceStart,
+					segments.m_sourceLength,
+					m_colors.logSourceText,
+					CFE_BOLD);
+				ApplyCharacterFormatToLogsRange(
+					lineStart + segments.m_threadStart,
+					segments.m_threadLength,
+					m_colors.logThreadText);
 				if (segments.m_messageLength != 0)
 				{
-					ApplyColorToLogsRange(lineStart + segments.m_messageStart, segments.m_messageLength, m_colors.primaryText);
+					ApplyCharacterFormatToLogsRange(
+						lineStart + segments.m_messageStart,
+						segments.m_messageLength,
+						m_colors.logMessageText);
 				}
 			}
 		}

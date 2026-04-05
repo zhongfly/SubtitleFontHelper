@@ -343,7 +343,10 @@ namespace
 		return logger;
 	}
 
-	void WriteEventLogLine(const wchar_t* level, const wchar_t* source, const std::wstring& message)
+	constexpr wchar_t LOG_SOURCE_DAEMON[] = L"daemon";
+	constexpr wchar_t LOG_SOURCE_DLL[] = L"dll";
+
+	void WriteEventLogLine(std::wstring_view level, std::wstring_view source, const std::wstring& message)
 	{
 		GetFileLogger().WriteLine(level, source, message);
 	}
@@ -362,7 +365,7 @@ sfh::EventLog& sfh::EventLog::GetInstance()
 void sfh::EventLog::LogDllAttach(uint32_t processId)
 {
 	(void)processId;
-	WriteEventLogLine(L"INFO", L"dll", L"DllAttach");
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DLL, L"DllAttach");
 }
 
 void sfh::EventLog::LogDllQuerySuccess(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
@@ -374,7 +377,7 @@ void sfh::EventLog::LogDllQuerySuccess(uint32_t processId, uint32_t threadId, co
 	oss << L"QuerySuccess request=\"" << (requestName ? requestName : L"NULL") << L"\""
 		<< L" source=\"" << (matchSource ? matchSource : L"unknown") << L"\""
 		<< L" paths=[" << JoinResponsePaths(responsePaths) << L"]";
-	WriteEventLogLine(L"INFO", L"dll", oss.str());
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DLL, oss.str());
 }
 
 void sfh::EventLog::LogDllQueryFailure(uint32_t processId, uint32_t threadId, const wchar_t* requestName,
@@ -385,7 +388,7 @@ void sfh::EventLog::LogDllQueryFailure(uint32_t processId, uint32_t threadId, co
 	(void)threadId;
 	oss << L"QueryFailure request=\"" << (requestName ? requestName : L"NULL") << L"\""
 		<< L" reason=\"" << (reason ? reason : L"NULL") << L"\"";
-	WriteEventLogLine(L"ERROR", L"dll", oss.str());
+	WriteEventLogLine(L"ERROR", LOG_SOURCE_DLL, oss.str());
 }
 
 void sfh::EventLog::LogDaemonTryAttach(uint32_t processId, const wchar_t* processName,
@@ -395,20 +398,20 @@ void sfh::EventLog::LogDaemonTryAttach(uint32_t processId, const wchar_t* proces
 	oss << L"TryAttach processId=" << processId
 		<< L" process=\"" << (processName ? processName : L"NULL") << L"\""
 		<< L" architecture=\"" << (processArchitecture ? processArchitecture : L"NULL") << L"\"";
-	WriteEventLogLine(L"INFO", L"daemon", oss.str());
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DAEMON, oss.str());
 }
 
 void sfh::EventLog::LogDaemonBumpVersion(uint32_t oldVersion, uint32_t newVersion)
 {
 	WriteEventLogLine(
 		L"INFO",
-		L"daemon",
+		LOG_SOURCE_DAEMON,
 		L"BumpVersion old=" + std::to_wstring(oldVersion) + L" new=" + std::to_wstring(newVersion));
 }
 
 void sfh::EventLog::LogDllInjectProcessSuccess(uint32_t processId)
 {
-	WriteEventLogLine(L"INFO", L"dll", L"InjectProcessSuccess processId=" + std::to_wstring(processId));
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DLL, L"InjectProcessSuccess processId=" + std::to_wstring(processId));
 }
 
 void sfh::EventLog::LogDllInjectProcessFailure(uint32_t processId, const wchar_t* reason)
@@ -416,7 +419,7 @@ void sfh::EventLog::LogDllInjectProcessFailure(uint32_t processId, const wchar_t
 	std::wostringstream oss;
 	oss << L"InjectProcessFailure processId=" << processId
 		<< L" reason=\"" << (reason ? reason : L"NULL") << L"\"";
-	WriteEventLogLine(L"ERROR", L"dll", oss.str());
+	WriteEventLogLine(L"ERROR", LOG_SOURCE_DLL, oss.str());
 }
 
 void sfh::EventLog::LogDllQueryNoResult(uint32_t processId, uint32_t threadId, const wchar_t* requestName)
@@ -425,7 +428,7 @@ void sfh::EventLog::LogDllQueryNoResult(uint32_t processId, uint32_t threadId, c
 	(void)processId;
 	(void)threadId;
 	oss << L"QueryNoResult request=\"" << (requestName ? requestName : L"NULL") << L"\"";
-	WriteEventLogLine(L"INFO", L"dll", oss.str());
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DLL, oss.str());
 }
 
 void sfh::EventLog::LogDllLoadFont(uint32_t processId, uint32_t threadId, const wchar_t* path)
@@ -434,12 +437,12 @@ void sfh::EventLog::LogDllLoadFont(uint32_t processId, uint32_t threadId, const 
 	(void)processId;
 	(void)threadId;
 	oss << L"LoadFont path=\"" << (path ? path : L"NULL") << L"\"";
-	WriteEventLogLine(L"INFO", L"dll", oss.str());
+	WriteEventLogLine(L"INFO", LOG_SOURCE_DLL, oss.str());
 }
 
 void sfh::EventLog::LogDebugMessageSingle(const wchar_t* str)
 {
-	WriteEventLogLine(L"DEBUG", L"debug", str ? str : L"NULL");
+	WriteEventLogLine(L"DEBUG", LOG_SOURCE_DAEMON, str ? str : L"NULL");
 }
 
 void sfh::EventLog::LogDebugMessage(const char* fmt, ...)

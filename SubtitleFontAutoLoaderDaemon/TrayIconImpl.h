@@ -55,6 +55,10 @@ private:
 		COLORREF primaryText;
 		COLORREF secondaryText;
 		COLORREF accentText;
+		COLORREF logTimestampText;
+		COLORREF logSourceText;
+		COLORREF logThreadText;
+		COLORREF logMessageText;
 		COLORREF logInfoText;
 		COLORREF logWarnText;
 		COLORREF logErrorText;
@@ -73,10 +77,14 @@ private:
 		RGB(50, 44, 36),     // primaryText
 		RGB(102, 92, 78),    // secondaryText
 		RGB(123, 87, 43),    // accentText
-		RGB(60, 105, 60),    // logInfoText
+		RGB(112, 103, 92),   // logTimestampText
+		RGB(111, 78, 36),    // logSourceText
+		RGB(128, 120, 108),  // logThreadText
+		RGB(26, 26, 26),     // logMessageText
+		RGB(35, 98, 62),     // logInfoText
 		RGB(160, 110, 30),   // logWarnText
 		RGB(170, 58, 40),    // logErrorText
-		RGB(94, 86, 148),    // logDebugText
+		RGB(52, 92, 138),    // logDebugText
 		RGB(248, 244, 237),  // listAltBackground
 		RGB(214, 224, 232),  // listSelectedBackground
 		RGB(35, 31, 26),     // listSelectedText
@@ -91,10 +99,14 @@ private:
 		RGB(220, 216, 210),  // primaryText
 		RGB(160, 155, 148),  // secondaryText
 		RGB(200, 165, 110),  // accentText
+		RGB(146, 140, 132),  // logTimestampText
+		RGB(220, 185, 126),  // logSourceText
+		RGB(134, 140, 150),  // logThreadText
+		RGB(232, 228, 220),  // logMessageText
 		RGB(132, 192, 132),  // logInfoText
 		RGB(224, 188, 92),   // logWarnText
 		RGB(236, 116, 102),  // logErrorText
-		RGB(156, 144, 222),  // logDebugText
+		RGB(120, 172, 230),  // logDebugText
 		RGB(38, 38, 38),     // listAltBackground
 		RGB(55, 75, 105),    // listSelectedBackground
 		RGB(230, 228, 224),  // listSelectedText
@@ -251,7 +263,7 @@ private:
 	void ScrollLogsEditToBottom();
 	bool EnsureRichEditModuleLoaded();
 	static COLORREF GetLogLevelColor(const ThemeColors& colors, std::wstring_view level);
-	void ApplyColorToLogsRange(size_t start, size_t length, COLORREF color);
+	void ApplyCharacterFormatToLogsRange(size_t start, size_t length, COLORREF color, DWORD effects = 0);
 	void ApplyLogsRichTextFormatting(const std::wstring& contentText);
 	void RefreshLogsEditTheme();
 	static std::wstring Utf8ToWideBestEffort(std::string_view utf8);

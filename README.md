@@ -25,10 +25,10 @@
 托盘菜单提供 `Fonts`、`Logs` 和 `Exit`：
 
 - `Fonts`：打开字体浏览窗口，查看当前已加载了几个字体索引、每个索引包含多少字体文件和字体名称，并按字体名称搜索结果。
-- `Logs`：打开内置日志查看窗口，以 RichEdit 彩色高亮方式查看当前 `SubtitleFontHelper.log` 主日志文件，并自动跟随新增内容与日志轮转。
+- `Logs`：打开内置日志查看窗口，以 RichEdit 按字段高亮查看当前 `SubtitleFontHelper.log` 主日志文件，并自动跟随新增内容与日志轮转。
 - `Exit`：退出 daemon。
 
-日志将会写入程序目录下的 `SubtitleFontHelper.log`，并按大小自动轮转为 `SubtitleFontHelper.log.1` 到 `SubtitleFontHelper.log.5`。达到约 10MiB 后会滚动到下一个归档文件。`Logs` 窗口只显示当前主日志文件的最新片段，不切换查看归档文件。
+日志将会写入程序目录下的 `SubtitleFontHelper.log`，并按 `时间 [消息等级] [来源] [pid=:tid=] 正文` 的统一结构输出，按大小自动轮转为 `SubtitleFontHelper.log.1` 到 `SubtitleFontHelper.log.5`。达到约 10MiB 后会滚动到下一个归档文件。`Logs` 窗口只显示当前主日志文件的最新片段，不切换查看归档文件。
 
 运行前需要安装 [Visual C++ 运行时](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 

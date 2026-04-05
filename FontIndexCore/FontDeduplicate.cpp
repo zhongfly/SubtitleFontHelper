@@ -5,6 +5,8 @@
 #undef min
 #undef max
 
+#pragma comment(lib, "xxhash.lib")
+
 #include <algorithm>
 #include <memory>
 #include <mutex>

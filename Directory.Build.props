@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
+    <SolutionDir Condition="'$(SolutionDir)' == ''">$(RepositoryRoot)</SolutionDir>
+  </PropertyGroup>
+</Project>

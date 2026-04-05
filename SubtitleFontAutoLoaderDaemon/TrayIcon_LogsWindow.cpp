@@ -408,47 +408,49 @@ void sfh::SystemTray::Implementation::ApplyLogsRichTextFormatting(const std::wst
 	SendMessageW(m_logsEdit, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&originalSelection));
 	SendMessageW(m_logsEdit, WM_SETREDRAW, FALSE, 0);
 	RefreshLogsEditTheme();
-	ApplyCharacterFormatToLogsRange(0, contentText.size(), m_colors.logMessageText);
+	const auto controlTextLength = static_cast<size_t>(GetWindowTextLengthW(m_logsEdit));
+	ApplyCharacterFormatToLogsRange(0, controlTextLength, m_colors.logMessageText);
 
-	size_t lineStart = 0;
-	while (lineStart < contentText.size())
+	size_t textLineStart = 0;
+	size_t controlLineStart = 0;
+	while (textLineStart < contentText.size())
 	{
-		size_t lineEnd = contentText.find(L"\r\n", lineStart);
+		size_t lineEnd = contentText.find(L"\r\n", textLineStart);
 		if (lineEnd == std::wstring::npos)
 		{
 			lineEnd = contentText.size();
 		}
 
-		std::wstring_view line(contentText.data() + lineStart, lineEnd - lineStart);
+		std::wstring_view line(contentText.data() + textLineStart, lineEnd - textLineStart);
 		if (!line.empty() && IsLogEntryStartLine(line))
 		{
 			StructuredLogLineSegments segments{};
 			if (TryParseStructuredLogLine(line, segments))
 			{
-				ApplyCharacterFormatToLogsRange(lineStart, 23, m_colors.logTimestampText);
+				ApplyCharacterFormatToLogsRange(controlLineStart, 23, m_colors.logTimestampText);
 
 				const size_t levelNameStart = segments.m_levelStart + 1;
 				const size_t levelNameLength = segments.m_levelLength >= 2 ? segments.m_levelLength - 2 : 0;
 				ApplyCharacterFormatToLogsRange(
-					lineStart + segments.m_levelStart,
+					controlLineStart + segments.m_levelStart,
 					segments.m_levelLength,
 					GetLogLevelColor(
 						m_colors,
 						line.substr(levelNameStart, levelNameLength)),
 					CFE_BOLD);
 				ApplyCharacterFormatToLogsRange(
-					lineStart + segments.m_sourceStart,
+					controlLineStart + segments.m_sourceStart,
 					segments.m_sourceLength,
 					m_colors.logSourceText,
 					CFE_BOLD);
 				ApplyCharacterFormatToLogsRange(
-					lineStart + segments.m_threadStart,
+					controlLineStart + segments.m_threadStart,
 					segments.m_threadLength,
 					m_colors.logThreadText);
 				if (segments.m_messageLength != 0)
 				{
 					ApplyCharacterFormatToLogsRange(
-						lineStart + segments.m_messageStart,
+						controlLineStart + segments.m_messageStart,
 						segments.m_messageLength,
 						m_colors.logMessageText);
 				}
@@ -459,7 +461,8 @@ void sfh::SystemTray::Implementation::ApplyLogsRichTextFormatting(const std::wst
 		{
 			break;
 		}
-		lineStart = lineEnd + 2;
+		textLineStart = lineEnd + 2;
+		controlLineStart += line.size() + 1;
 	}
 
 	SendMessageW(m_logsEdit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&originalSelection));

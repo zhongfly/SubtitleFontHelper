@@ -15,6 +15,14 @@ namespace
 		size_t m_messageLength = 0;
 	};
 
+	struct LogsViewportState
+	{
+		DWORD m_selectionStart = 0;
+		DWORD m_selectionEnd = 0;
+		LONG m_firstVisibleLine = 0;
+		POINT m_scrollPosition{};
+	};
+
 	bool TryParseStructuredLogLine(std::wstring_view line, StructuredLogLineSegments& segments)
 	{
 		if (line.size() < 23 || line[23] != L' ')
@@ -79,6 +87,39 @@ namespace
 		}
 
 		return true;
+	}
+
+	LogsViewportState CaptureLogsViewportState(HWND editHandle, bool usesRichEdit)
+	{
+		LogsViewportState state{};
+		SendMessageW(
+			editHandle,
+			EM_GETSEL,
+			reinterpret_cast<WPARAM>(&state.m_selectionStart),
+			reinterpret_cast<LPARAM>(&state.m_selectionEnd));
+		state.m_firstVisibleLine = static_cast<LONG>(SendMessageW(editHandle, EM_GETFIRSTVISIBLELINE, 0, 0));
+		if (usesRichEdit)
+		{
+			SendMessageW(editHandle, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&state.m_scrollPosition));
+		}
+		return state;
+	}
+
+	void RestoreLogsViewportState(HWND editHandle, bool usesRichEdit, const LogsViewportState& state)
+	{
+		const DWORD textLength = static_cast<DWORD>(GetWindowTextLengthW(editHandle));
+		const DWORD selectionStart = (std::min)(state.m_selectionStart, textLength);
+		const DWORD selectionEnd = (std::min)(state.m_selectionEnd, textLength);
+		SendMessageW(editHandle, EM_SETSEL, selectionStart, selectionEnd);
+		if (usesRichEdit)
+		{
+			POINT scrollPosition = state.m_scrollPosition;
+			SendMessageW(editHandle, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scrollPosition));
+			return;
+		}
+
+		const LONG currentFirstVisibleLine = static_cast<LONG>(SendMessageW(editHandle, EM_GETFIRSTVISIBLELINE, 0, 0));
+		SendMessageW(editHandle, EM_LINESCROLL, 0, state.m_firstVisibleLine - currentFirstVisibleLine);
 	}
 }
 
@@ -338,6 +379,7 @@ void sfh::SystemTray::Implementation::ScrollLogsEditToBottom()
 
 	const auto length = GetWindowTextLengthW(m_logsEdit);
 	SendMessageW(m_logsEdit, EM_SETSEL, static_cast<WPARAM>(length), static_cast<LPARAM>(length));
+	SendMessageW(m_logsEdit, WM_VSCROLL, SB_BOTTOM, 0);
 	SendMessageW(m_logsEdit, EM_SCROLLCARET, 0, 0);
 }
 
@@ -824,13 +866,18 @@ void sfh::SystemTray::Implementation::UpdateLogsWindowText(const std::wstring& s
 	}
 	if (m_logsEdit != nullptr)
 	{
+		const auto viewportState = scrollToBottom
+			? LogsViewportState{}
+			: CaptureLogsViewportState(m_logsEdit, m_logsUsesRichEdit);
 		SetWindowTextW(m_logsEdit, contentText.c_str());
 		ApplyLogsRichTextFormatting(contentText);
 		if (scrollToBottom)
 		{
-			const auto length = GetWindowTextLengthW(m_logsEdit);
-			SendMessageW(m_logsEdit, EM_SETSEL, static_cast<WPARAM>(length), static_cast<LPARAM>(length));
-			SendMessageW(m_logsEdit, EM_SCROLLCARET, 0, 0);
+			ScrollLogsEditToBottom();
+		}
+		else
+		{
+			RestoreLogsViewportState(m_logsEdit, m_logsUsesRichEdit, viewportState);
 		}
 	}
 }

@@ -183,7 +183,7 @@ void sfh::SystemTray::Implementation::SetupFontsWindowControls(HWND hWnd)
 		WS_EX_CLIENTEDGE,
 		L"EDIT",
 		L"",
-		WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | ES_LEFT | ES_AUTOHSCROLL,
 		16,
 		278,
 		700,
@@ -196,7 +196,7 @@ void sfh::SystemTray::Implementation::SetupFontsWindowControls(HWND hWnd)
 		0,
 		L"BUTTON",
 		L"\u00D7",
-		WS_CHILD | BS_PUSHBUTTON | BS_FLAT,
+		WS_CHILD | WS_CLIPSIBLINGS | BS_PUSHBUTTON | BS_FLAT,
 		16,
 		278,
 		24,
@@ -241,6 +241,13 @@ void sfh::SystemTray::Implementation::SetupFontsWindowControls(HWND hWnd)
 		ApplyToolWindowFont(m_fontsSearchEdit);
 		SendMessageW(m_fontsSearchEdit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(10, 10));
 		SendMessageW(m_fontsSearchEdit, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"搜索族名、完整名称或 PostScript 名称"));
+	}
+	if (m_fontsSearchClearButton != nullptr)
+	{
+		ApplyToolWindowFont(m_fontsSearchClearButton);
+		ShowWindow(m_fontsSearchClearButton, SW_HIDE);
+		SetWindowPos(m_fontsSearchClearButton, HWND_TOP, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	}
 	if (m_fontsSearchSummaryLabel != nullptr)
 	{
@@ -315,6 +322,8 @@ void sfh::SystemTray::Implementation::LayoutFontsWindowControls(int clientWidth,
 			left + availableWidth - clearBtnSize - clearBtnMargin,
 			searchEditTop + clearBtnMargin,
 			clearBtnSize, clearBtnSize, TRUE);
+		SetWindowPos(m_fontsSearchClearButton, HWND_TOP, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		SendMessageW(m_fontsSearchEdit, EM_SETMARGINS, EC_RIGHTMARGIN, MAKELPARAM(0, clearBtnSize + clearBtnMargin * 2));
 	}
 	MoveWindow(m_fontsSearchSummaryLabel, left, searchEditTop + gap38, availableWidth, summaryHeight, TRUE);

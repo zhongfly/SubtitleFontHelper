@@ -80,6 +80,7 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			ApplyToolWindowSectionFont(m_fontsIndexesSectionLabel);
 			ApplyToolWindowSectionFont(m_fontsSearchSectionLabel);
 			ApplyToolWindowFont(m_fontsSearchEdit);
+			ApplyToolWindowFont(m_fontsSearchClearButton);
 			ApplyToolWindowFont(m_fontsSearchSummaryLabel);
 			ApplyToolWindowFont(m_fontsIndexListView);
 			ApplyToolWindowFont(m_fontsResultListView);
@@ -135,6 +136,11 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 			{
 				const bool hasText = GetWindowTextLengthW(m_fontsSearchEdit) > 0;
 				ShowWindow(m_fontsSearchClearButton, hasText ? SW_SHOW : SW_HIDE);
+				if (hasText)
+				{
+					SetWindowPos(m_fontsSearchClearButton, HWND_TOP, 0, 0, 0, 0,
+						SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+				}
 			}
 			return 0;
 		}

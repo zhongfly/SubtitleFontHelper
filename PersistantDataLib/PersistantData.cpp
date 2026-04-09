@@ -206,6 +206,38 @@ namespace
 		return ret;
 	}
 
+	std::string WideToUtf8String(const std::wstring_view str)
+	{
+		if (str.empty())
+			return {};
+		const int length = WideCharToMultiByte(
+			CP_UTF8,
+			WC_ERR_INVALID_CHARS,
+			str.data(),
+			static_cast<int>(str.size()),
+			nullptr,
+			0,
+			nullptr,
+			nullptr);
+		if (length == 0)
+			throw std::runtime_error("invalid wide string");
+
+		std::string ret(length, '\0');
+		if (WideCharToMultiByte(
+			CP_UTF8,
+			WC_ERR_INVALID_CHARS,
+			str.data(),
+			static_cast<int>(str.size()),
+			ret.data(),
+			length,
+			nullptr,
+			nullptr) == 0)
+		{
+			throw std::runtime_error("invalid wide string");
+		}
+		return ret;
+	}
+
 	std::string TrimAscii(std::string_view value)
 	{
 		size_t begin = 0;
@@ -226,6 +258,77 @@ namespace
 		if (rawPath.has_root_name() || rawPath.has_root_directory())
 			return std::filesystem::absolute(rawPath).lexically_normal();
 		return std::filesystem::absolute(baseDirectory / rawPath).lexically_normal();
+	}
+
+	std::wstring ExpandConfigEnvironmentVariables(
+		const std::wstring& rawPath,
+		const char* fieldName)
+	{
+		if (rawPath.empty())
+			return rawPath;
+
+		std::wstring expanded;
+		expanded.reserve(rawPath.size());
+
+		size_t segmentStart = 0;
+		while (segmentStart < rawPath.size())
+		{
+			const auto tokenStart = rawPath.find(L'%', segmentStart);
+			if (tokenStart == std::wstring::npos)
+			{
+				expanded.append(rawPath, segmentStart, std::wstring::npos);
+				break;
+			}
+
+			expanded.append(rawPath, segmentStart, tokenStart - segmentStart);
+
+			const auto tokenEnd = rawPath.find(L'%', tokenStart + 1);
+			if (tokenEnd == std::wstring::npos)
+			{
+				throw std::runtime_error(
+					std::string(fieldName)
+					+ " contains an unterminated environment variable: "
+					+ WideToUtf8String(rawPath));
+			}
+			if (tokenEnd == tokenStart + 1)
+			{
+				throw std::runtime_error(
+					std::string(fieldName)
+					+ " contains an empty environment variable name: "
+					+ WideToUtf8String(rawPath));
+			}
+
+			const auto variableName = rawPath.substr(tokenStart + 1, tokenEnd - tokenStart - 1);
+			SetLastError(ERROR_SUCCESS);
+			const auto requiredLength = GetEnvironmentVariableW(variableName.c_str(), nullptr, 0);
+			if (requiredLength == 0)
+			{
+				const auto error = GetLastError();
+				if (error == ERROR_ENVVAR_NOT_FOUND)
+				{
+					throw std::runtime_error(
+						std::string(fieldName)
+						+ " references an undefined environment variable: "
+						+ WideToUtf8String(variableName));
+				}
+				THROW_WIN32(error);
+			}
+
+			std::wstring variableValue(requiredLength, L'\0');
+			const auto writtenLength = GetEnvironmentVariableW(
+				variableName.c_str(),
+				variableValue.data(),
+				static_cast<DWORD>(variableValue.size()));
+			if (writtenLength == 0 || writtenLength >= variableValue.size())
+			{
+				THROW_LAST_ERROR();
+			}
+			variableValue.resize(writtenLength);
+			expanded += variableValue;
+			segmentStart = tokenEnd + 1;
+		}
+
+		return expanded;
 	}
 
 	std::filesystem::path GetPersistedBaseDirectory(const std::filesystem::path& persistedPath)
@@ -256,10 +359,14 @@ namespace
 		const auto baseDirectory = GetPersistedBaseDirectory(configPath);
 		for (auto& indexFile : config.m_indexFile)
 		{
-			indexFile.m_path = ResolvePersistedPath(indexFile.m_path, baseDirectory).wstring();
+			indexFile.m_path = ResolvePersistedPath(
+				ExpandConfigEnvironmentVariables(indexFile.m_path, "index_files.path"),
+				baseDirectory).wstring();
 			for (auto& sourceFolder : indexFile.m_sourceFolders)
 			{
-				sourceFolder = ResolvePersistedPath(sourceFolder, baseDirectory).wstring();
+				sourceFolder = ResolvePersistedPath(
+					ExpandConfigEnvironmentVariables(sourceFolder, "index_files.source_folders"),
+					baseDirectory).wstring();
 			}
 		}
 	}

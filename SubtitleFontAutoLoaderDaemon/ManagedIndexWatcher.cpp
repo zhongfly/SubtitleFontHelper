@@ -53,6 +53,24 @@ namespace sfh
 			return MakePathKey(lhs) == MakePathKey(rhs);
 		}
 
+		void TryLogManagedIndexNotificationPathFailure(
+			const std::filesystem::path& watchPath,
+			const std::wstring& relativeName,
+			const wil::ResultException& e)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index watcher notification path failed: watch=\"%ls\" relative=\"%ls\" hr=%lld",
+					watchPath.c_str(),
+					relativeName.c_str(),
+					static_cast<long long>(e.GetErrorCode()));
+			}
+			catch (...)
+			{
+			}
+		}
+
 		std::wstring BuildSyncToastMessage(
 			const std::wstring& indexName,
 			const FontDatabase& updatedDatabase,
@@ -437,13 +455,23 @@ namespace sfh
 			return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 		}
 
-		std::filesystem::path BuildNotificationPath(
+		bool TryBuildNotificationPath(
 			const FolderWatch& watch,
-			const FILE_NOTIFY_INFORMATION& notification) const
+			const FILE_NOTIFY_INFORMATION& notification,
+			std::filesystem::path& path) const
 		{
 			const auto charCount = notification.FileNameLength / sizeof(WCHAR);
 			std::wstring relativeName(notification.FileName, charCount);
-			return FontIndexCore::NormalizePath(watch.m_path / relativeName);
+			try
+			{
+				path = FontIndexCore::NormalizePath(watch.m_path / relativeName);
+				return true;
+			}
+			catch (const wil::ResultException& e)
+			{
+				TryLogManagedIndexNotificationPathFailure(watch.m_path, relativeName, e);
+				return false;
+			}
 		}
 
 		void AccumulateNotification(
@@ -471,7 +499,12 @@ namespace sfh
 				return;
 			}
 
-			const auto path = BuildNotificationPath(watch, notification);
+			std::filesystem::path path;
+			if (!TryBuildNotificationPath(watch, notification, path))
+			{
+				pending.RequireFullRescan();
+				return;
+			}
 			if (IsDirectoryLevelChange(path))
 			{
 				pending.RequireFullRescan();

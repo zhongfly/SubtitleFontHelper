@@ -159,6 +159,42 @@ namespace sfh
 			}
 		}
 
+		void TryLogManagedIndexUpdateHashFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index update hash file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexUpdateGroupFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index update group file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
 		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
 		{
 			if (isCancelled && isCancelled())
@@ -756,14 +792,16 @@ namespace sfh
 				m_workerCount,
 				isCancelled,
 				feedback.GetProgressCounter(),
-				[](const std::filesystem::path&, const std::string&)
+				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					TryLogManagedIndexUpdateHashFailure(m_task.m_indexPath, path, errorMessage);
 				});
 			auto groups = FontIndexCore::GroupEquivalentFiles(
 				snapshot,
 				isCancelled,
-				[](const std::filesystem::path&, const std::string&)
+				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					TryLogManagedIndexUpdateGroupFailure(m_task.m_indexPath, path, errorMessage);
 				});
 			return groups;
 		}

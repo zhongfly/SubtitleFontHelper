@@ -200,6 +200,18 @@ namespace FontIndexCore
 			return true;
 		}
 
+		void LogSnapshotEntryCaptureFailure(
+			const std::filesystem::path& path,
+			const wil::ResultException& e)
+		{
+			std::wstring message = L"SFH snapshot entry skipped: path=\"";
+			message += path.wstring();
+			message += L"\" hr=";
+			message += std::to_wstring(static_cast<long long>(e.GetErrorCode()));
+			message += L"\n";
+			OutputDebugStringW(message.c_str());
+		}
+
 		void WriteBytes(
 			std::ofstream& stream,
 			const void* data,
@@ -317,7 +329,15 @@ namespace FontIndexCore
 		{
 			return false;
 		}
-		entry.m_path = NormalizePath(path);
+		try
+		{
+			entry.m_path = NormalizePath(path);
+		}
+		catch (const wil::ResultException& e)
+		{
+			LogSnapshotEntryCaptureFailure(path, e);
+			return false;
+		}
 		entry.m_fileSize = fileSize;
 		entry.m_lastWriteTime = lastWriteTime;
 		return true;

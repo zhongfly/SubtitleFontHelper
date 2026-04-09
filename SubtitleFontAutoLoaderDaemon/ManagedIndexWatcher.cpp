@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "EventLog.h"
+#include "ManagedIndexFailureNotification.h"
 #include "ManagedIndexLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
@@ -812,7 +813,8 @@ namespace sfh
 		std::vector<std::vector<size_t>> BuildContentGroups(
 			FontIndexCore::DirectorySnapshot& snapshot,
 			const std::stop_token& stopToken,
-			const ManagedIndexBuildFeedbackSession& feedback)
+			const ManagedIndexBuildFeedbackSession& feedback,
+			ManagedIndexFailureCollector& failureCollector)
 		{
 			auto isCancelled = [&]()
 			{
@@ -827,6 +829,7 @@ namespace sfh
 				feedback.GetProgressCounter(),
 				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					failureCollector.Record(ManagedIndexFailureStage::Hash, path);
 					TryLogManagedIndexUpdateHashFailure(m_task.m_indexPath, path, errorMessage);
 				});
 			auto groups = FontIndexCore::GroupEquivalentFiles(
@@ -834,6 +837,7 @@ namespace sfh
 				isCancelled,
 				[&](const std::filesystem::path& path, const std::string& errorMessage)
 				{
+					failureCollector.Record(ManagedIndexFailureStage::Group, path);
 					TryLogManagedIndexUpdateGroupFailure(m_task.m_indexPath, path, errorMessage);
 				});
 			return groups;
@@ -844,6 +848,7 @@ namespace sfh
 			FontIndexCore::DirectorySnapshot newSnapshot)
 		{
 			const auto indexName = GetDisplayName(m_task.m_indexPath);
+			ManagedIndexFailureCollector failureCollector;
 			auto isCancelled = [&]()
 			{
 				return stopToken.stop_requested();
@@ -861,7 +866,7 @@ namespace sfh
 					ApplyCachedHashes(m_lastSnapshot, newSnapshot);
 				}
 
-				const auto groups = BuildContentGroups(newSnapshot, stopToken, feedback);
+				const auto groups = BuildContentGroups(newSnapshot, stopToken, feedback, failureCollector);
 				EnsureLoadedDatabase();
 				ThrowIfCancelled(isCancelled);
 				const auto previousDatabase = m_database;
@@ -968,6 +973,7 @@ namespace sfh
 						feedback.GetProgressCounter(),
 						[&](const std::filesystem::path& path, const std::string& errorMessage)
 						{
+							failureCollector.Record(ManagedIndexFailureStage::Analyze, path);
 							TryLogManagedIndexUpdateAnalyzeFailure(m_task.m_indexPath, path, errorMessage);
 						});
 
@@ -1012,12 +1018,24 @@ namespace sfh
 							removedPaths,
 							modifiedPaths));
 				}
+				if (m_task.m_enableFailureNotifications && failureCollector.HasFailures())
+				{
+					TryShowToast(
+						L"Subtitle Font Helper",
+						failureCollector.BuildToastMessage(ManagedIndexWorkType::Update, indexName));
+				}
 				m_daemon->NotifyManagedIndexBuilt(m_task.m_indexPath);
 			}
 			catch (const std::exception& e)
 			{
 				if (!stopToken.stop_requested() && m_task.m_enableFailureNotifications)
 				{
+					if (failureCollector.HasFailures())
+					{
+						TryShowToast(
+							L"Subtitle Font Helper",
+							failureCollector.BuildToastMessage(ManagedIndexWorkType::Update, indexName));
+					}
 					TryShowToast(
 						L"Subtitle Font Helper",
 						L"索引更新失败：" + indexName + L"（" + Utf8ToWideString(e.what()) + L"）");

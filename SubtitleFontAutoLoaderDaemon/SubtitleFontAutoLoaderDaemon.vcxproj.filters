@@ -66,6 +66,9 @@
     <ClCompile Include="ManagedIndexBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ManagedIndexFailureNotification.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ManagedIndexWatcher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -111,6 +114,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ManagedIndexBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ManagedIndexFailureNotification.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ManagedIndexWatcher.h">

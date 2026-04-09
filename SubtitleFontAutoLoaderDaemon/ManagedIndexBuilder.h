@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "IDaemon.h"
+#include "ManagedIndexFailureNotification.h"
 #include "ManagedIndexProgress.h"
 #include "PersistantData.h"
 
@@ -47,6 +48,7 @@ namespace sfh
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
-		const ManagedIndexBuildFeedbackSession& feedback);
+		const ManagedIndexBuildFeedbackSession& feedback,
+		ManagedIndexFailureCollector& failureCollector);
 	void ValidateManagedIndexSourceFolders(const ManagedIndexBuilder::Task& task);
 }

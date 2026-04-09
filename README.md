@@ -87,7 +87,7 @@ source_folders = [
  - `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
  - `[notifications]` 用于集中放置所有系统通知相关开关。
  - `[notifications].managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
- - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败和更新失败。默认开启。
+ - `[notifications].managed_index_failure_notifications` 单独控制字体索引失败通知，包括建立失败、更新失败，以及建立/更新过程中单个字体文件失败但被跳过时的汇总通知。默认开启。
  - `[notifications].missing_font_notifications` 控制字体缺失通知。默认关闭；当字体既不在索引里、系统也没有对应字体时，会弹出一次系统通知。设为 `true` 可开启。
  - `[notifications].missing_font_ignore` 是一个正则字符串列表。启用字体缺失通知后，如果某个字体缺失名称被任一规则整串匹配，就不发送相应的字体缺失通知。默认区分大小写；例如 `Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配；单条规则可用 `i:` 前缀启用忽略大小写，例如 `i:.*arial.*`。
  - `[[notifications.process_missing_font_ignore]]` 用于设置按进程名生效的缺失字体忽略规则。`regex` 支持单个正则字符串或字符串列表，并统一使用整串匹配；例如 `Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配，`['Some Missing Font', '[A-Z0-9]{8}']` 表示同一组进程共享多条规则。`processes` 为一个或多个进程 `exe` 文件名，`flags = 'i'` 表示该条规则忽略大小写，可省略。

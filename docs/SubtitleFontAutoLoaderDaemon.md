@@ -89,7 +89,7 @@ source_folders = ['fonts']
 - `lru_size`：预取 LRU 容量（条目数）。
 - `[notifications]`：集中定义所有系统通知相关开关。
 - `[notifications].managed_index_notifications`：统一控制托管索引的系统通知。默认关闭；开启后会提示索引建立开始、建立完成、更新完成。
-- `[notifications].managed_index_failure_notifications`：单独控制索引失败通知。默认开启；包括索引建立失败和更新失败。
+- `[notifications].managed_index_failure_notifications`：单独控制索引失败通知。默认开启；包括索引建立失败、更新失败，以及建立/更新过程中单个文件失败但被跳过时的汇总通知。
 - `[notifications].missing_font_notifications`：缺失字体系统通知开关。默认关闭；仅当索引查询无结果且系统字体也不存在时才提示。
 - `[notifications].missing_font_ignore`：正则字符串列表。启用缺失字体通知后，如果 `missingQuery` 被任一规则整串匹配，则不发送缺失字体 toast。默认区分大小写；`Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配；单条规则可用 `i:` 前缀启用忽略大小写，例如 `i:.*arial.*`。
 - `[[notifications.process_missing_font_ignore]]`：按进程名限定的缺失字体忽略规则表。`regex` 支持单个正则字符串或字符串列表，并统一使用整串正则匹配 `missingQuery`；`Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配，`['Some Missing Font', '[A-Z0-9]{8}']` 表示同一组进程共享多条规则。`processes` 填一个或多个进程 `exe` 文件名，`flags = 'i'` 表示该条规则忽略大小写，可省略。

@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "EventLog.h"
+#include "ManagedIndexFailureNotification.h"
 #include "ManagedIndexLog.h"
 #include "ToastNotifier.h"
 #include "PersistantData.h"
@@ -221,7 +222,8 @@ namespace sfh
 		const ManagedIndexBuilder::Task& task,
 		size_t workerCount,
 		const std::function<bool()>& isCancelled,
-		const ManagedIndexBuildFeedbackSession& feedback)
+		const ManagedIndexBuildFeedbackSession& feedback,
+		ManagedIndexFailureCollector& failureCollector)
 	{
 		ValidateManagedIndexSourceFolders(task);
 		feedback.SetStage(ManagedIndexBuildStage::Scanning);
@@ -234,6 +236,7 @@ namespace sfh
 			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				failureCollector.Record(ManagedIndexFailureStage::Hash, path);
 				TryLogManagedIndexBuildHashFailure(task.m_indexPath, path, errorMessage);
 			});
 		auto groups = FontIndexCore::GroupEquivalentFiles(
@@ -241,6 +244,7 @@ namespace sfh
 			isCancelled,
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				failureCollector.Record(ManagedIndexFailureStage::Group, path);
 				TryLogManagedIndexBuildGroupFailure(task.m_indexPath, path, errorMessage);
 			});
 
@@ -259,6 +263,7 @@ namespace sfh
 			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				failureCollector.Record(ManagedIndexFailureStage::Analyze, path);
 				TryLogManagedIndexBuildAnalyzeFailure(task.m_indexPath, path, errorMessage);
 			});
 		ThrowIfCancelled(isCancelled);
@@ -279,6 +284,7 @@ namespace sfh
 				task.m_indexPath,
 				task.m_progressState,
 				ManagedIndexWorkType::Build);
+			ManagedIndexFailureCollector failureCollector;
 			TryLogManagedIndexBuildStart(task);
 
 			try
@@ -295,7 +301,7 @@ namespace sfh
 					return stopToken.stop_requested();
 				};
 
-				auto result = BuildManagedIndex(task, workerCount, isCancelled, feedback);
+				auto result = BuildManagedIndex(task, workerCount, isCancelled, feedback, failureCollector);
 				const auto fontFileCount = result.m_sourceFontFileCount;
 
 				if (task.m_enableNotifications)
@@ -303,6 +309,12 @@ namespace sfh
 					TryShowToast(
 						L"Subtitle Font Helper",
 						L"索引建立完成：" + indexName + L"（字体文件 " + std::to_wstring(fontFileCount) + L" 个）");
+				}
+				if (task.m_enableFailureNotifications && failureCollector.HasFailures())
+				{
+					TryShowToast(
+						L"Subtitle Font Helper",
+						failureCollector.BuildToastMessage(ManagedIndexWorkType::Build, indexName));
 				}
 				TryLogManagedIndexBuildComplete(task, result.m_database, fontFileCount);
 				daemon->NotifyManagedIndexBuilt(task.m_indexPath);
@@ -312,6 +324,12 @@ namespace sfh
 				TryLogManagedIndexBuildFailure(task, e);
 				if (!stopToken.stop_requested() && task.m_enableFailureNotifications)
 				{
+					if (failureCollector.HasFailures())
+					{
+						TryShowToast(
+							L"Subtitle Font Helper",
+							failureCollector.BuildToastMessage(ManagedIndexWorkType::Build, indexName));
+					}
 					TryShowToast(
 						L"Subtitle Font Helper",
 						L"索引建立失败：" + indexName + L"（" + Utf8ToWideString(e.what()) + L"）");

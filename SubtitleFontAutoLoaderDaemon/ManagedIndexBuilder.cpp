@@ -102,6 +102,42 @@ namespace sfh
 			}
 		}
 
+		void TryLogManagedIndexBuildHashFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build hash file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexBuildGroupFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build group file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
 		void ThrowIfCancelled(const std::function<bool()>& isCancelled)
 		{
 			if (isCancelled && isCancelled())
@@ -196,14 +232,16 @@ namespace sfh
 			workerCount,
 			isCancelled,
 			feedback.GetProgressCounter(),
-			[](const std::filesystem::path&, const std::string&)
+			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				TryLogManagedIndexBuildHashFailure(task.m_indexPath, path, errorMessage);
 			});
 		auto groups = FontIndexCore::GroupEquivalentFiles(
 			snapshot,
 			isCancelled,
-			[](const std::filesystem::path&, const std::string&)
+			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
+				TryLogManagedIndexBuildGroupFailure(task.m_indexPath, path, errorMessage);
 			});
 
 		std::vector<std::filesystem::path> fontPaths;

@@ -173,31 +173,21 @@ namespace sfh
 		ValidateManagedIndexSourceFolders(task);
 		feedback.SetStage(ManagedIndexBuildStage::Scanning);
 		auto snapshot = FontIndexCore::CaptureDirectorySnapshot(task.m_sourceFolders, isCancelled);
-		std::vector<std::string> failures;
-		std::mutex failureLock;
 		feedback.SetStage(ManagedIndexBuildStage::Hashing, CountHashWorkItems(snapshot));
 		FontIndexCore::PopulateMissingContentHashes(
 			snapshot,
 			workerCount,
 			isCancelled,
 			feedback.GetProgressCounter(),
-			[&](const std::filesystem::path& path, const std::string& errorMessage)
+			[](const std::filesystem::path&, const std::string&)
 			{
-				std::lock_guard lg(failureLock);
-				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 			});
 		auto groups = FontIndexCore::GroupEquivalentFiles(
 			snapshot,
 			isCancelled,
-			[&](const std::filesystem::path& path, const std::string& errorMessage)
+			[](const std::filesystem::path&, const std::string&)
 			{
-				std::lock_guard lg(failureLock);
-				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
 			});
-		if (!failures.empty())
-		{
-			throw std::runtime_error(failures.front());
-		}
 
 		std::vector<std::filesystem::path> fontPaths;
 		fontPaths.reserve(groups.size());
@@ -207,6 +197,8 @@ namespace sfh
 		}
 
 		feedback.SetStage(ManagedIndexBuildStage::Analyzing, fontPaths.size());
+		std::vector<std::string> failures;
+		std::mutex failureLock;
 		auto db = FontIndexCore::BuildFontDatabase(
 			fontPaths,
 			workerCount,

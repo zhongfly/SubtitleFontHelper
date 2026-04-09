@@ -18,7 +18,6 @@
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
-#include <mutex>
 #include <wil/resource.h>
 
 namespace sfh
@@ -136,6 +135,24 @@ namespace sfh
 					removedSummary.m_fontNamesSummary.c_str(),
 					modifiedPaths.size(),
 					modifiedSummary.m_fontNamesSummary.c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexUpdateAnalyzeFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index update analyze file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
 			}
 			catch (...)
 			{
@@ -872,8 +889,6 @@ namespace sfh
 
 				if (!pathsToAnalyze.empty())
 				{
-					std::vector<std::string> analyzeFailures;
-					std::mutex analyzeFailureLock;
 					feedback.SetStage(ManagedIndexBuildStage::Analyzing, pathsToAnalyze.size());
 					auto analyzed = FontIndexCore::BuildFontDatabase(
 						pathsToAnalyze,
@@ -882,13 +897,8 @@ namespace sfh
 						feedback.GetProgressCounter(),
 						[&](const std::filesystem::path& path, const std::string& errorMessage)
 						{
-							std::lock_guard lg(analyzeFailureLock);
-							analyzeFailures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+							TryLogManagedIndexUpdateAnalyzeFailure(m_task.m_indexPath, path, errorMessage);
 						});
-					if (!analyzeFailures.empty())
-					{
-						throw std::runtime_error(analyzeFailures.front());
-					}
 
 					m_database.m_fonts.insert(
 						m_database.m_fonts.end(),

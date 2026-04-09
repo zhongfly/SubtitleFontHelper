@@ -13,7 +13,6 @@
 #include <Windows.h>
 
 #include <unordered_map>
-#include <mutex>
 #include <wil/resource.h>
 
 namespace sfh
@@ -79,6 +78,24 @@ namespace sfh
 					L"managed index build failed: index=\"%ls\" error=\"%ls\"",
 					task.m_indexPath.c_str(),
 					Utf8ToWideString(e.what()).c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
+		void TryLogManagedIndexBuildAnalyzeFailure(
+			const std::filesystem::path& indexPath,
+			const std::filesystem::path& path,
+			const std::string& errorMessage)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"managed index build analyze file failed: index=\"%ls\" path=\"%ls\" error=\"%ls\"",
+					indexPath.c_str(),
+					path.c_str(),
+					Utf8ToWideString(errorMessage).c_str());
 			}
 			catch (...)
 			{
@@ -197,8 +214,6 @@ namespace sfh
 		}
 
 		feedback.SetStage(ManagedIndexBuildStage::Analyzing, fontPaths.size());
-		std::vector<std::string> failures;
-		std::mutex failureLock;
 		auto db = FontIndexCore::BuildFontDatabase(
 			fontPaths,
 			workerCount,
@@ -206,13 +221,8 @@ namespace sfh
 			feedback.GetProgressCounter(),
 			[&](const std::filesystem::path& path, const std::string& errorMessage)
 			{
-				std::lock_guard lg(failureLock);
-				failures.push_back(WideToUtf8String(path.wstring()) + ": " + errorMessage);
+				TryLogManagedIndexBuildAnalyzeFailure(task.m_indexPath, path, errorMessage);
 			});
-		if (!failures.empty())
-		{
-			throw std::runtime_error(failures.front());
-		}
 		ThrowIfCancelled(isCancelled);
 		feedback.SetStage(ManagedIndexBuildStage::Writing, fontPaths.size(), fontPaths.size());
 		WriteFontDatabaseAtomically(task.m_indexPath, db);

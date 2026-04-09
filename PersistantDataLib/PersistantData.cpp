@@ -357,6 +357,12 @@ namespace
 	void ResolveTomlConfigPaths(sfh::ConfigFile& config, const std::filesystem::path& configPath)
 	{
 		const auto baseDirectory = GetPersistedBaseDirectory(configPath);
+		if (!config.logPath.empty())
+		{
+			config.logPath = ResolvePersistedPath(
+				ExpandConfigEnvironmentVariables(config.logPath, "log_path"),
+				baseDirectory).wstring();
+		}
 		for (auto& indexFile : config.m_indexFile)
 		{
 			indexFile.m_path = ResolvePersistedPath(
@@ -948,6 +954,10 @@ namespace
 			else if (key == "lru_size")
 			{
 				m_config->lruSize = ExpectUInt32(value, key.c_str());
+			}
+			else if (key == "log_path")
+			{
+				m_config->logPath = ExpectString(value, key.c_str());
 			}
 			else if (key == "monitor_processes")
 			{

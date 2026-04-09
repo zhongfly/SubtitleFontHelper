@@ -620,6 +620,11 @@ namespace sfh
 			{
 				return ConfigFile::ReadFromFile(configPath);
 			});
+			const bool hadServiceBeforeInit = m_service != nullptr;
+			if (!hadServiceBeforeInit)
+			{
+				EventLog::GetInstance().SetLogFilePath(cfg->logPath);
+			}
 			const auto managedBuildWorkerCount = GetDefaultWorkerCount();
 
 			const auto serviceGeneration = m_nextServiceGeneration++;
@@ -762,6 +767,10 @@ namespace sfh
 				{
 					m_systemTray = std::move(newSystemTray);
 					m_systemTray->Start();
+				}
+				if (hadServiceBeforeInit)
+				{
+					EventLog::GetInstance().SetLogFilePath(cfg->logPath);
 				}
 				m_service->m_queryService->PublishVersion();
 			}

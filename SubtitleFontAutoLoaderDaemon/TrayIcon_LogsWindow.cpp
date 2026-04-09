@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
+#include "EventLog.h"
 
 namespace
 {
@@ -590,8 +591,7 @@ std::wstring sfh::SystemTray::Implementation::FormatFileTimeText(const FILETIME&
 
 void sfh::SystemTray::Implementation::ResolveLogsPath()
 {
-	const std::filesystem::path modulePath{wil::GetModuleFileNameW<wil::unique_hlocal_string>().get()};
-	m_logsPath = (modulePath.parent_path() / LOG_FILE_NAME).wstring();
+	m_logsPath = EventLog::GetInstance().GetLogFilePath();
 }
 
 std::wstring sfh::SystemTray::Implementation::GetLogsDisplayName() const
@@ -884,7 +884,20 @@ void sfh::SystemTray::Implementation::UpdateLogsWindowText(const std::wstring& s
 
 void sfh::SystemTray::Implementation::RefreshLogsWindowContent(bool forceReload)
 {
-	if (m_logsStatusLabel == nullptr || m_logsEdit == nullptr || m_logsPath.empty())
+	if (m_logsStatusLabel == nullptr || m_logsEdit == nullptr)
+	{
+		return;
+	}
+	const auto resolvedLogPath = EventLog::GetInstance().GetLogFilePath();
+	if (resolvedLogPath != m_logsPath)
+	{
+		m_logsPath = resolvedLogPath;
+		m_logsHasObservedFile = false;
+		m_logsLastReadFailed = false;
+		m_logsLastFileSize = 0;
+		m_logsLastWriteTime = {};
+	}
+	if (m_logsPath.empty())
 	{
 		return;
 	}

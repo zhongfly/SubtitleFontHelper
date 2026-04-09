@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "EventLog.h"
+#include "LogPathState.h"
 
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -14,10 +16,7 @@
 constexpr size_t INITIAL_BUFFER_SIZE = 256;
 constexpr uint64_t MAX_LOG_FILE_SIZE = 10ull * 1024ull * 1024ull;
 constexpr int MAX_LOG_ARCHIVE_COUNT = 5;
-constexpr wchar_t LOG_FILE_NAME[] = L"SubtitleFontHelper.log";
 constexpr wchar_t LOG_MUTEX_NAME[] = L"Local\\SubtitleFontHelperLogMutex";
-
-extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace
 {
@@ -194,36 +193,11 @@ namespace
 	class FileLogger
 	{
 	private:
-		std::wstring m_logPath;
 		ScopedHandle m_mutex;
 
-		static std::wstring GetModuleDirectory()
+		static std::wstring GetArchivePath(const std::wstring& logPath, int index)
 		{
-			std::wstring modulePath(MAX_PATH, L'\0');
-			DWORD length = 0;
-			while (true)
-			{
-				length = GetModuleFileNameW(
-					reinterpret_cast<HMODULE>(&__ImageBase),
-					modulePath.data(),
-					static_cast<DWORD>(modulePath.size()));
-				if (length == 0)
-					return L".";
-				if (length < modulePath.size() - 1)
-					break;
-				modulePath.resize(modulePath.size() * 2);
-			}
-			modulePath.resize(length);
-			const auto lastSlash = modulePath.find_last_of(L"\\/");
-			if (lastSlash == std::wstring::npos)
-				return L".";
-			modulePath.resize(lastSlash);
-			return modulePath;
-		}
-
-		std::wstring GetArchivePath(int index) const
-		{
-			return m_logPath + L"." + std::to_wstring(index);
+			return logPath + L"." + std::to_wstring(index);
 		}
 
 		static bool FileExists(const std::wstring& path)
@@ -232,10 +206,22 @@ namespace
 			return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 		}
 
-		void RotateIfNeeded(size_t incomingBytes)
+		static void EnsureLogDirectoryExists(const std::wstring& logPath)
+		{
+			const auto parentPath = std::filesystem::path(logPath).parent_path();
+			if (parentPath.empty())
+			{
+				return;
+			}
+
+			std::error_code ec;
+			std::filesystem::create_directories(parentPath, ec);
+		}
+
+		static void RotateIfNeeded(const std::wstring& logPath, size_t incomingBytes)
 		{
 			ScopedHandle file(CreateFileW(
-				m_logPath.c_str(),
+				logPath.c_str(),
 				FILE_APPEND_DATA,
 				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 				nullptr,
@@ -251,31 +237,30 @@ namespace
 			if (static_cast<uint64_t>(fileSize.QuadPart) + incomingBytes < MAX_LOG_FILE_SIZE)
 				return;
 
-			DeleteFileW(GetArchivePath(MAX_LOG_ARCHIVE_COUNT).c_str());
+			DeleteFileW(GetArchivePath(logPath, MAX_LOG_ARCHIVE_COUNT).c_str());
 			for (int index = MAX_LOG_ARCHIVE_COUNT - 1; index >= 1; --index)
 			{
-				const auto sourcePath = GetArchivePath(index);
+				const auto sourcePath = GetArchivePath(logPath, index);
 				if (FileExists(sourcePath))
 				{
 					MoveFileExW(
 						sourcePath.c_str(),
-						GetArchivePath(index + 1).c_str(),
+						GetArchivePath(logPath, index + 1).c_str(),
 						MOVEFILE_REPLACE_EXISTING);
 				}
 			}
-			if (FileExists(m_logPath))
+			if (FileExists(logPath))
 			{
 				MoveFileExW(
-					m_logPath.c_str(),
-					GetArchivePath(1).c_str(),
+					logPath.c_str(),
+					GetArchivePath(logPath, 1).c_str(),
 					MOVEFILE_REPLACE_EXISTING);
 			}
 		}
 
 	public:
 		FileLogger()
-			: m_logPath(GetModuleDirectory() + L"\\" + std::wstring(LOG_FILE_NAME)),
-			  m_mutex(CreateMutexW(nullptr, FALSE, LOG_MUTEX_NAME))
+			: m_mutex(CreateMutexW(nullptr, FALSE, LOG_MUTEX_NAME))
 		{
 		}
 
@@ -303,10 +288,14 @@ namespace
 			if (m_mutex.is_valid() && !lock.IsLocked())
 				return;
 
-			RotateIfNeeded(utf8.size());
+			const auto logPath = sfh::GetSharedLogFilePath();
+			if (logPath.empty())
+				return;
+			EnsureLogDirectoryExists(logPath);
+			RotateIfNeeded(logPath, utf8.size());
 
 			ScopedHandle file(CreateFileW(
-				m_logPath.c_str(),
+				logPath.c_str(),
 				FILE_APPEND_DATA,
 				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 				nullptr,
@@ -360,6 +349,16 @@ sfh::EventLog& sfh::EventLog::GetInstance()
 {
 	static EventLog instance;
 	return instance;
+}
+
+void sfh::EventLog::SetLogFilePath(const std::wstring& path)
+{
+	SetSharedLogFilePath(path);
+}
+
+std::wstring sfh::EventLog::GetLogFilePath() const
+{
+	return GetSharedLogFilePath();
 }
 
 void sfh::EventLog::LogDllAttach(uint32_t processId)

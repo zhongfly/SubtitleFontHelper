@@ -38,7 +38,7 @@ flowchart LR
 
 ## 2. 运行时文件与配置
 
-默认约定：daemon 从 **exe 同目录**读取配置 `SubtitleFontHelper.toml`，并在同目录读写 `lruCache.txt`。当前 TOML 读取实现支持本项目所需的简单子集：正整数、字符串、字符串数组，以及 `[notifications]` 和 `[[index_files]]` 表。
+默认约定：daemon 从 **exe 同目录**读取配置 `SubtitleFontHelper.toml`，并在同目录读写 `lruCache.txt`。日志默认也写在 exe 同目录，但可以通过 `log_path` 改到自定义位置。当前 TOML 读取实现支持本项目所需的简单子集：正整数、字符串、字符串数组，以及 `[notifications]` 和 `[[index_files]]` 表。
 
 典型运行目录（按 `copyFiles.ps1` 的打包方式）包含：
 
@@ -54,6 +54,7 @@ flowchart LR
 ```toml
 wmi_poll_interval = 1000
 lru_size = 100
+log_path = '%LOCALAPPDATA%/SubtitleFontHelper/Logs/SubtitleFontHelper.log'
 monitor_processes = ["mpc-hc64.exe", "mpc-hc.exe"]
 
 [notifications]
@@ -76,9 +77,11 @@ path = 'indexes/FontIndex.xml'
 source_folders = ['fonts']
 ```
 
+- `log_path`：日志主文件路径。未配置时默认是 exe 同目录下的 `SubtitleFontHelper.log`；配置后 daemon 与注入 DLL 都会写入同一主日志文件，并在同目录下轮转 `.1` 到 `.5` 归档。
 - `index_files[].path`：字体索引 XML 路径（可多条）。
 - `source_folders[]`：托管索引对应的字体目录；配置后会首建索引，并通过 watcher 维护增量同步。
-- TOML 里的 `index_files[].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录（通常也是 exe 目录）；绝对路径仍可用。
+- TOML 里的 `log_path`、`index_files[].path` 与 `source_folders[]` 支持 `%NAME%` 环境变量展开；变量名大小写不敏感，未解析会显式报错。
+- TOML 里的 `log_path`、`index_files[].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录（通常也是 exe 目录）；绝对路径仍可用。
 - 索引 XML 内的 `FontFace/@path` 支持相对路径，基准目录是该 XML 文件所在目录；daemon 读取后统一解析为绝对路径。
 - managed index 的 `.state.bin` 快照在可行时会写成相对快照文件目录的路径；当前写出版本为 v2，读取仍兼容 v1。
 - `monitor_processes`：要监控的进程“路径或进程名”。实现上是**后缀匹配**（忽略大小写）并要求边界为路径起点或分隔符。
@@ -132,7 +135,7 @@ stateDiagram-v2
 - 启动初期显示 “Loading” 图标与提示；`OnInit()` 完成后调用 `SystemTray::NotifyFinishLoad()` 切换到常规图标。
 - 右键菜单提供 `Fonts`、`Logs` 与 `Exit`：
   - `Fonts`：打开单实例字体浏览窗口，显示当前已加载字体索引概览，并支持按 `family name`、`FullName`、`PostScriptName` 搜索字体。
-  - `Logs`：打开单实例日志查看窗口，使用 RichEdit 只读显示当前 `SubtitleFontHelper.log` 主日志文件尾部；日志统一按 `时间 [消息等级] [来源] [pid=:tid=] 正文` 组织，并对时间、级别、来源、线程元数据分别做高亮，正文保持主文本色；窗口打开期间每秒检查一次文件大小和最后写入时间，发生追加、截断或轮转后自动刷新。
+  - `Logs`：打开单实例日志查看窗口，使用 RichEdit 只读显示当前主日志文件尾部；日志统一按 `时间 [消息等级] [来源] [pid=:tid=] 正文` 组织，并对时间、级别、来源、线程元数据分别做高亮，正文保持主文本色；窗口打开期间每秒检查一次文件大小和最后写入时间，发生追加、截断或轮转后自动刷新。
   - `Exit`：`IDaemon::NotifyExit()` → 主线程退出
 - `Fonts` 窗口通过 `SystemTray::NotifyFontUiDataChanged()` 事件驱动刷新，不轮询 `QueryService` 版本号。
 - `Logs` 窗口只显示当前主日志文件的最新片段，限制为最近 `1 MiB` 与最近 `5000` 行中的较小结果；归档文件 `SubtitleFontHelper.log.1` 到 `.5` 不在当前窗口中直接查看。

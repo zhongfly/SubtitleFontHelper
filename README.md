@@ -25,10 +25,10 @@
 托盘菜单提供 `Fonts`、`Logs` 和 `Exit`：
 
 - `Fonts`：打开字体浏览窗口，查看当前已加载了几个字体索引、每个索引包含多少字体文件和字体名称，并按字体名称搜索结果。
-- `Logs`：打开内置日志查看窗口，以 RichEdit 按字段高亮查看当前 `SubtitleFontHelper.log` 主日志文件，并自动跟随新增内容与日志轮转。
+- `Logs`：打开内置日志查看窗口，以 RichEdit 按字段高亮查看当前主日志文件，并自动跟随新增内容与日志轮转。
 - `Exit`：退出 daemon。
 
-日志将会写入程序目录下的 `SubtitleFontHelper.log`，并按 `时间 [消息等级] [来源] [pid=:tid=] 正文` 的统一结构输出，按大小自动轮转为 `SubtitleFontHelper.log.1` 到 `SubtitleFontHelper.log.5`。达到约 10MiB 后会滚动到下一个归档文件。`Logs` 窗口只显示当前主日志文件的最新片段，不切换查看归档文件。
+日志默认写入程序目录下的 `SubtitleFontHelper.log`；也可以通过配置文件中的 `log_path` 改到自定义位置。日志按 `时间 [消息等级] [来源] [pid=:tid=] 正文` 的统一结构输出，按大小自动轮转为 `SubtitleFontHelper.log.1` 到 `SubtitleFontHelper.log.5`。达到约 10MiB 后会滚动到下一个归档文件。`Logs` 窗口只显示当前主日志文件的最新片段，不切换查看归档文件。
 
 运行前需要安装 [Visual C++ 运行时](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
@@ -45,6 +45,7 @@
 ```
 wmi_poll_interval = 1000
 lru_size = 100
+# log_path = '%LOCALAPPDATA%/SubtitleFontHelper/Logs/SubtitleFontHelper.log'
 monitor_processes = [
   'mpc-hc64_nvo.exe',
   'mpc-hc_nvo.exe',
@@ -82,6 +83,7 @@ source_folders = [
  - 程序只读取 `SubtitleFontHelper.toml`。
  - `wmi_poll_interval` 指定WMI查询的间隔时间，毫秒数。较低的值导致较高的CPU使用率。较高的值可能会导致注入进程不够及时。
  - `lru_size` 指定服务启动时预加载的条目最大大小。
+ - `log_path` 用于指定日志主文件路径；未配置时默认使用程序目录下的 `SubtitleFontHelper.log`。程序会自动写入同目录下的轮转归档文件 `SubtitleFontHelper.log.1` 到 `.5`。
  - `monitor_processes` 用于指定要监视的进程路径或者进程名。由于程序使用了`rundll32.exe`作为注入过程中的辅助程序，指定该进程可能会导致灾难性的后果。
  - `[notifications]` 用于集中放置所有系统通知相关开关。
  - `[notifications].managed_index_notifications` 统一控制字体索引开始建立、建立完成、更新完成的系统通知。默认关闭。托盘里的“构建中/更新中”状态不受这个开关影响。
@@ -91,7 +93,8 @@ source_folders = [
  - `[[notifications.process_missing_font_ignore]]` 用于设置按进程名生效的缺失字体忽略规则。`regex` 支持单个正则字符串或字符串列表，并统一使用整串匹配；例如 `Some Missing Font` 表示整串匹配，`.*Arial.*` 表示包含匹配，`['Some Missing Font', '[A-Z0-9]{8}']` 表示同一组进程共享多条规则。`processes` 为一个或多个进程 `exe` 文件名，`flags = 'i'` 表示该条规则忽略大小写，可省略。
  - 如果配置里仍然使用旧键 `[notifications].missing_font_notification_ignore_queries`，程序会在成功读取后自动迁移成新键 `[notifications].missing_font_ignore`。
  - 每一节 `[[index_files]]` 都表示一个字体索引文件的配置：其中 `path` 用来设置字体索引文件的保存位置和名称； `source_folders` 表示字体索引文件所覆盖的字体文件来源，在字体索引文件已经存在时，可省略，省略后将不再监视其中的字体文件变化。
- - TOML 里的 `[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。
+ - TOML 里的 `log_path`、`[[index_files]].path` 与 `source_folders[]` 支持 `%NAME%` 环境变量展开；变量名大小写不敏感，未解析会显式报错。
+ - TOML 里的 `log_path`、`[[index_files]].path` 与 `source_folders[]` 支持相对路径，基准目录是 `SubtitleFontHelper.toml` 所在目录；绝对路径仍然可用。
  - 字体索引文件中 的 `FontFace/@path` 会在可行时写成相对索引文件目录的路径；程序读取后会统一解析成绝对路径。
  - 字体索引文件 的 `.state.bin` 快照会在可行时写成相对快照文件目录的路径，这个快照用于记录建立字体索引时的字体文件位置，以便更快速地、增量更新字体索引文件。
  - TOML 中**当前支持类型**的未知键会被忽略。

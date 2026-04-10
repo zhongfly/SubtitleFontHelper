@@ -32,7 +32,7 @@ namespace sfh
 
 		uint32_t wmiPollInterval = 500;
 		uint32_t lruSize = 100;
-		std::wstring logPath;
+		std::wstring dataPath;
 		bool managedIndexNotifications = false;
 		bool managedIndexFailureNotifications = true;
 		bool missingFontNotifications = false;

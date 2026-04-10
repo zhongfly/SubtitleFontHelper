@@ -101,6 +101,27 @@ namespace sfh
 			return directory / L"SubtitleFontHelper.toml";
 		}
 
+		std::filesystem::path ResolveDataDirectoryPath(
+			const std::filesystem::path& moduleDirectory,
+			const ConfigFile& config)
+		{
+			if (config.dataPath.empty())
+			{
+				return moduleDirectory;
+			}
+			return std::filesystem::path(config.dataPath);
+		}
+
+		std::filesystem::path BuildLogFilePath(const std::filesystem::path& dataDirectory)
+		{
+			return dataDirectory / L"SubtitleFontHelper.log";
+		}
+
+		std::filesystem::path BuildLruCachePath(const std::filesystem::path& dataDirectory)
+		{
+			return dataDirectory / L"lruCache.txt";
+		}
+
 		void AppendConfigWatchFiles(
 			std::vector<std::filesystem::path>& watchFiles,
 			const std::filesystem::path& directory)
@@ -615,15 +636,17 @@ namespace sfh
 			std::filesystem::path selfPath{wil::GetModuleFileNameW<wil::unique_hlocal_string>().get()};
 			selfPath.remove_filename();
 			auto configPath = ResolveConfigPath(selfPath);
-			auto lruCachePath = selfPath / L"lruCache.txt";
 			auto cfg = ReadWithRetry([&]()
 			{
 				return ConfigFile::ReadFromFile(configPath);
 			});
+			const auto dataDirectory = ResolveDataDirectoryPath(selfPath, *cfg);
+			const auto logFilePath = BuildLogFilePath(dataDirectory);
+			const auto lruCachePath = BuildLruCachePath(dataDirectory);
 			const bool hadServiceBeforeInit = m_service != nullptr;
 			if (!hadServiceBeforeInit)
 			{
-				EventLog::GetInstance().SetLogFilePath(cfg->logPath);
+				EventLog::GetInstance().SetLogFilePath(logFilePath.wstring());
 			}
 			const auto managedBuildWorkerCount = GetDefaultWorkerCount();
 
@@ -770,7 +793,7 @@ namespace sfh
 				}
 				if (hadServiceBeforeInit)
 				{
-					EventLog::GetInstance().SetLogFilePath(cfg->logPath);
+					EventLog::GetInstance().SetLogFilePath(logFilePath.wstring());
 				}
 				m_service->m_queryService->PublishVersion();
 			}

@@ -40,6 +40,25 @@ namespace
 		ScopedHandle(const ScopedHandle&) = delete;
 		ScopedHandle& operator=(const ScopedHandle&) = delete;
 
+		ScopedHandle(ScopedHandle&& other) noexcept : m_handle(other.m_handle)
+		{
+			other.m_handle = nullptr;
+		}
+
+		ScopedHandle& operator=(ScopedHandle&& other) noexcept
+		{
+			if (this != &other)
+			{
+				if (m_handle != nullptr && m_handle != INVALID_HANDLE_VALUE)
+				{
+					CloseHandle(m_handle);
+				}
+				m_handle = other.m_handle;
+				other.m_handle = nullptr;
+			}
+			return *this;
+		}
+
 		HANDLE get() const
 		{
 			return m_handle;
@@ -50,6 +69,8 @@ namespace
 			return m_handle != nullptr && m_handle != INVALID_HANDLE_VALUE;
 		}
 	};
+
+	ScopedHandle g_logPathMapping;
 
 	class ScopedMapView
 	{
@@ -263,9 +284,10 @@ void sfh::SetSharedLogFilePath(const std::wstring& path)
 	{
 		throw std::runtime_error("unable to create shared log path mapping");
 	}
+	g_logPathMapping = std::move(mapping);
 
 	ScopedMapView view(MapViewOfFile(
-		mapping.get(),
+		g_logPathMapping.get(),
 		FILE_MAP_WRITE,
 		0,
 		0,

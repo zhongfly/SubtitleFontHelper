@@ -319,6 +319,13 @@ private:
 
 	void SaveLruCache(const std::filesystem::path& path)
 	{
+		const auto parentPath = path.parent_path();
+		if (!parentPath.empty())
+		{
+			std::error_code ec;
+			std::filesystem::create_directories(parentPath, ec);
+		}
+
 		std::ofstream output(path, std::ios::out);
 		if (!output.is_open())
 			return;

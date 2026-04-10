@@ -219,6 +219,8 @@ function Write-ConfigFile {
 		[Parameter(Mandatory)]
 		[string]$ConfigPath,
 		[Parameter(Mandatory)]
+		[string]$DataRelativePath,
+		[Parameter(Mandatory)]
 		[string]$IndexRelativePath,
 		[Parameter(Mandatory)]
 		[string]$SourceRelativePath,
@@ -228,6 +230,7 @@ function Write-ConfigFile {
 	$lines = @(
 		'wmi_poll_interval = 1000'
 		'lru_size = 10'
+		"data_path = '$DataRelativePath'"
 	)
 	if ($MonitorProcesses.Count -eq 0) {
 		$lines += 'monitor_processes = []'
@@ -352,6 +355,7 @@ try {
 	$timestamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
 	$workDirectory = Join-Path $env:TEMP "SubtitleFontHelper.ManagedIndexSmoke\$timestamp"
 	$null = New-Item -ItemType Directory -Path $workDirectory -Force
+	$null = New-Item -ItemType Directory -Path (Join-Path $workDirectory 'data') -Force
 	$null = New-Item -ItemType Directory -Path (Join-Path $workDirectory 'fonts-a') -Force
 	$null = New-Item -ItemType Directory -Path (Join-Path $workDirectory 'fonts-b') -Force
 	$null = New-Item -ItemType Directory -Path (Join-Path $workDirectory 'indexes') -Force
@@ -370,13 +374,13 @@ try {
 	}
 
 	$configPath = Join-Path $workDirectory 'SubtitleFontHelper.toml'
-	$logPath = Join-Path $workDirectory 'SubtitleFontHelper.log'
+	$logPath = Join-Path $workDirectory 'data/SubtitleFontHelper.log'
 	$indexPath = Join-Path $workDirectory 'indexes/FontIndex.xml'
 	$statePath = Join-Path $workDirectory 'indexes/FontIndex.xml.state.bin'
 	$reloadIndexPath = Join-Path $workDirectory 'indexes/FontIndexReload.xml'
 	$reloadStatePath = Join-Path $workDirectory 'indexes/FontIndexReload.xml.state.bin'
 
-	Write-ConfigFile -ConfigPath $configPath -IndexRelativePath 'indexes/FontIndex.xml' -SourceRelativePath 'fonts-a'
+	Write-ConfigFile -ConfigPath $configPath -DataRelativePath 'data' -IndexRelativePath 'indexes/FontIndex.xml' -SourceRelativePath 'fonts-a'
 	Start-Sleep -Milliseconds 500
 
 	$daemonProcess = Start-DaemonProcess -WorkingDirectory $workDirectory
@@ -404,7 +408,7 @@ try {
 	Assert-NoLogPattern -LogPath $logPath -Pattern ([regex]'managed index build start: index="[^"]*FontIndex\.xml"') -StartLine $phase2Config.LineIndex -Description 'unexpected full rebuild detected after second startup'
 
 	$lineCountBeforeReload = (Get-LogLines -LogPath $logPath).Count
-	Write-ConfigFile -ConfigPath $configPath -IndexRelativePath 'indexes/FontIndexReload.xml' -SourceRelativePath 'fonts-b'
+	Write-ConfigFile -ConfigPath $configPath -DataRelativePath 'data' -IndexRelativePath 'indexes/FontIndexReload.xml' -SourceRelativePath 'fonts-b'
 	Start-Sleep -Milliseconds 500
 	Stop-TestProcess -Process $daemonProcess
 	$daemonProcess = $null
@@ -446,12 +450,12 @@ try {
 		throw "rundll32 injection helper exited with code $($injectorProcess.ExitCode).`n$(Get-LogTail -LogPath $phase4LogPath)"
 	}
 
-	$attachPattern = [regex]("\[pid=$clientPid:tid=\d+\] DllAttach$")
+	$attachPattern = [regex]("\[pid=${clientPid}:tid=\d+\] DllAttach$")
 	$injectSuccessPattern = [regex]("InjectProcessSuccess processId=$clientPid")
 	$injectFailurePattern = [regex]("InjectProcessFailure processId=$clientPid")
 
-	$null = Wait-ForLogPattern -LogPath $phase4LogPath -Pattern $attachPattern -Description 'DllAttach log for SmokeFontClient' -WatchedProcesses @($clientProcess) -StartLine $lineCountBeforeInjection
-	$null = Wait-ForLogPattern -LogPath $phase4LogPath -Pattern $injectSuccessPattern -Description 'InjectProcessSuccess log for SmokeFontClient' -WatchedProcesses @($clientProcess) -StartLine $lineCountBeforeInjection
+	$null = Wait-ForLogPattern -LogPath $phase4LogPath -Pattern $attachPattern -Description 'DllAttach log for SmokeFontClient' -StartLine $lineCountBeforeInjection
+	$null = Wait-ForLogPattern -LogPath $phase4LogPath -Pattern $injectSuccessPattern -Description 'InjectProcessSuccess log for SmokeFontClient' -StartLine $lineCountBeforeInjection
 
 	if (-not $clientProcess.WaitForExit($TimeoutSec * 1000)) {
 		throw "SmokeFontClient did not exit within ${TimeoutSec}s.`n$(Get-LogTail -LogPath $phase4LogPath)"

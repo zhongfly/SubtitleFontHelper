@@ -1,6 +1,6 @@
 wmi_poll_interval = 1000
 lru_size = 100
-# log_path = '%LOCALAPPDATA%/SubtitleFontHelper/Logs/SubtitleFontHelper.log'
+# data_path = '%LOCALAPPDATA%/SubtitleFontHelper'
 monitor_processes = [
 	'mpc-hc64_nvo.exe',
 	'mpc-hc_nvo.exe',

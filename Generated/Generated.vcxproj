@@ -213,23 +213,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="..\event.man">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mc.exe -um %(Identity) -z %(Filename) -h $(IntDir)exres -rc $(IntDir)exres</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compile Event Messages...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)exres\%(Filename).h</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mc.exe -um %(Identity) -z %(Filename) -h $(IntDir)exres -rc $(IntDir)exres</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compile Event Messages...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)exres\%(Filename).h</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mc.exe -um %(Identity) -z %(Filename) -h $(IntDir)exres -rc $(IntDir)exres</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compile Event Messages...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)exres\%(Filename).h</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mc.exe -um %(Identity) -z %(Filename) -h $(IntDir)exres -rc $(IntDir)exres</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compile Event Messages...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)exres\%(Filename).h</Outputs>
-    </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

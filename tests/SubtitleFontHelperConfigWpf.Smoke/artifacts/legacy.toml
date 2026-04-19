@@ -1,0 +1,10 @@
+wmi_poll_interval = 500
+lru_size = 50
+monitor_processes = ['mpc-hc64_nvo.exe']
+
+[notifications]
+missing_font_notification_ignore_queries = ['Legacy Font']
+
+[[notifications.process_missing_font_ignore]]
+query_regex = 'Legacy.*'
+processes = ['mpc-hc64_nvo.exe']

@@ -1,0 +1,10 @@
+wmi_poll_interval = 500
+lru_size = 100
+data_path = 'C:\Temp\SubtitleFontHelper'
+monitor_processes = ['C:\Players\mpc-hc64_nvo.exe']
+
+[[index_files]]
+path = 'D:\Fonts\FontIndex.xml'
+source_folders = [
+    'D:\Fonts\Library',
+]

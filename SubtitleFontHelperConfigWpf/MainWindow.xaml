@@ -1,0 +1,784 @@
+<Window x:Class="SubtitleFontHelperConfigWpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:infra="clr-namespace:SubtitleFontHelperConfigWpf.Infrastructure"
+        xmlns:vm="clr-namespace:SubtitleFontHelperConfigWpf.ViewModels"
+        mc:Ignorable="d"
+        Title="{Binding WindowTitle}"
+        Width="1400"
+        Height="920"
+        MinWidth="1220"
+        MinHeight="780"
+        Background="#F3EEE7"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <infra:PageKeyToVisibilityConverter x:Key="PageKeyToVisibilityConverter" />
+
+        <Style x:Key="NavItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Container"
+                                Background="#FFFDF8"
+                                BorderBrush="#E5D7C8"
+                                BorderThickness="1"
+                                CornerRadius="18"
+                                Padding="16">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Container" Property="BorderBrush" Value="#C79047" />
+                                <Setter TargetName="Container" Property="Background" Value="#FFF5E6" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Container" Property="BorderBrush" Value="#B57B35" />
+                                <Setter TargetName="Container" Property="Background" Value="#F9E4BE" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="#D3C3B2" />
+            <Setter Property="Background" Value="#FFFCF8" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Style.Triggers>
+                <Trigger Property="Validation.HasError" Value="True">
+                    <Setter Property="BorderBrush" Value="#B4432F" />
+                    <Setter Property="ToolTip"
+                            Value="{Binding RelativeSource={RelativeSource Self}, Path=(Validation.Errors)[0].ErrorContent}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,0,0,14" />
+            <Setter Property="Foreground" Value="#223447" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <BulletDecorator Background="Transparent">
+                            <BulletDecorator.Bullet>
+                                <Border Width="18"
+                                        Height="18"
+                                        Margin="0,2,10,0"
+                                        CornerRadius="4"
+                                        Background="#FFFDF8"
+                                        BorderBrush="#C9B8A3"
+                                        BorderThickness="1">
+                                    <Path x:Name="CheckMark"
+                                          Data="M 3 9 L 7 13 L 15 4"
+                                          Stroke="#1E3447"
+                                          StrokeThickness="2.2"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          Visibility="Collapsed" />
+                                </Border>
+                            </BulletDecorator.Bullet>
+                            <ContentPresenter VerticalAlignment="Center">
+                                <ContentPresenter.Content>
+                                    <TextBlock Text="{TemplateBinding Content}"
+                                               TextWrapping="Wrap"
+                                               Foreground="{TemplateBinding Foreground}"
+                                               FontSize="{TemplateBinding FontSize}" />
+                                </ContentPresenter.Content>
+                            </ContentPresenter>
+                        </BulletDecorator>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#D48E3F" />
+            <Setter Property="Foreground" Value="#1D2732" />
+            <Setter Property="BorderBrush" Value="#D48E3F" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="16,9" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="13">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="#F7F0E6" />
+            <Setter Property="Foreground" Value="#203142" />
+            <Setter Property="BorderBrush" Value="#CFBA9F" />
+        </Style>
+
+        <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="#D66755" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#D66755" />
+        </Style>
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,0,0,18" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <Border Background="#FFFCF8"
+                                BorderBrush="#E5D8C8"
+                                BorderThickness="1"
+                                CornerRadius="22"
+                                Padding="22">
+                            <StackPanel>
+                                <TextBlock Text="{TemplateBinding Header}"
+                                           FontSize="20"
+                                           FontWeight="SemiBold"
+                                           Foreground="#162636"
+                                           TextWrapping="Wrap" />
+                                <ContentPresenter Margin="0,16,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PlainListBoxStyle" TargetType="ListBox">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style x:Key="SoftListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Container"
+                                Background="#FFF8F0"
+                                BorderBrush="#E7D9C8"
+                                BorderThickness="1"
+                                CornerRadius="16"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Container" Property="Background" Value="#FCEBCF" />
+                                <Setter TargetName="Container" Property="BorderBrush" Value="#C78C3D" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Container" Property="BorderBrush" Value="#C78C3D" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionHintStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#657386" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
+        <Style x:Key="CardBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FFF9F3" />
+            <Setter Property="BorderBrush" Value="#E2D4C5" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="22" />
+            <Setter Property="Padding" Value="20" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="316" />
+            <ColumnDefinition Width="24" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Grid.Column="0"
+                Background="#FFF9F3"
+                BorderBrush="#E7DACB"
+                BorderThickness="1"
+                CornerRadius="30"
+                Padding="24">
+            <ListBox ItemsSource="{Binding NavigationItems}"
+                     SelectedItem="{Binding SelectedNavigationItem}"
+                     ItemContainerStyle="{StaticResource NavItemStyle}"
+                     Style="{StaticResource PlainListBoxStyle}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:NavigationItemViewModel}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Title}"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Foreground="#1A2938"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,6,0,0"
+                                       Text="{Binding Description}"
+                                       FontSize="12"
+                                       Foreground="#59697B"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+        <Border Grid.Row="0"
+                Grid.Column="2"
+                Background="#FFF8F2"
+                BorderBrush="#E8DCCE"
+                BorderThickness="1"
+                CornerRadius="30"
+                Padding="28">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Background="#F7E8D4"
+                        CornerRadius="22"
+                        Padding="20">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="{Binding SelectedNavigationItem.Title}"
+                                       FontSize="28"
+                                       FontWeight="Bold"
+                                       Foreground="#162636"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Text="{Binding SelectedNavigationItem.Description}"
+                                       FontSize="14"
+                                       Foreground="#5F6F81"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Border Grid.Column="1"
+                                Background="#FFFDF8"
+                                CornerRadius="16"
+                                Padding="14,10"
+                                VerticalAlignment="Center"
+                                Margin="18,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="状态"
+                                           FontSize="11"
+                                           Foreground="#7A8897" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Text="{Binding StatusMessage}"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="#223447"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <ScrollViewer Grid.Row="1"
+                              Margin="0,24,0,0"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <Grid>
+                        <StackPanel Visibility="{Binding CurrentPageKey, Converter={StaticResource PageKeyToVisibilityConverter}, ConverterParameter=general}">
+                            <GroupBox Header="运行设置">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="26" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel>
+                                        <TextBlock Text="WMI 轮询间隔（毫秒）"
+                                                   FontSize="14"
+                                                   Foreground="#28435E"
+                                                   ToolTip="wmi_poll_interval" />
+                                        <TextBox>
+                                            <TextBox.Text>
+                                                <Binding Path="WmiPollInterval" UpdateSourceTrigger="PropertyChanged" ValidatesOnExceptions="True">
+                                                    <Binding.ValidationRules>
+                                                        <infra:IntegerRangeValidationRule Minimum="50" Maximum="600000" />
+                                                    </Binding.ValidationRules>
+                                                </Binding>
+                                            </TextBox.Text>
+                                        </TextBox>
+                                        <TextBlock Margin="0,8,0,0"
+                                                   Style="{StaticResource SectionHintStyle}"
+                                                   Text="范围 50 到 600000。值越小响应越快，但 WMI 和 CPU 占用也会更高。" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="LRU 预加载容量"
+                                                   FontSize="14"
+                                                   Foreground="#28435E"
+                                                   ToolTip="lru_size" />
+                                        <TextBox>
+                                            <TextBox.Text>
+                                                <Binding Path="LruSize" UpdateSourceTrigger="PropertyChanged" ValidatesOnExceptions="True">
+                                                    <Binding.ValidationRules>
+                                                        <infra:IntegerRangeValidationRule Minimum="0" Maximum="1000000" />
+                                                    </Binding.ValidationRules>
+                                                </Binding>
+                                            </TextBox.Text>
+                                        </TextBox>
+                                        <TextBlock Margin="0,8,0,0"
+                                                   Style="{StaticResource SectionHintStyle}"
+                                                   Text="范围 0 到 1000000，用于控制启动时预载缓存条目数量。" />
+                                    </StackPanel>
+                                </Grid>
+                            </GroupBox>
+
+                            <GroupBox Header="运行数据保存目录"
+                                      ToolTip="data_path">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHintStyle}"
+                                               Text="不填时使用程序目录。日志和 LRU 缓存等运行数据会保存到这里。" />
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding DataPath, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="12,6,0,0"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="选择文件夹"
+                                                Command="{Binding BrowseDataPathCommand}" />
+                                    </Grid>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding CurrentPageKey, Converter={StaticResource PageKeyToVisibilityConverter}, ConverterParameter=monitor}">
+                            <GroupBox Header="监视进程"
+                                      ToolTip="monitor_processes">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHintStyle}"
+                                               Text="支持直接输入 exe 名称，或通过“选择 exe / 从窗口拾取”自动填入。rundll32.exe 会被阻止。" />
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding NewMonitorProcessValue, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="12,6,0,0"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Content="添加"
+                                                Command="{Binding CommitMonitorProcessDraftCommand}" />
+                                    </Grid>
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="删除"
+                                                Command="{Binding RemoveMonitorProcessCommand}" />
+                                        <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="选择 exe"
+                                                Command="{Binding BrowseMonitorProcessCommand}" />
+                                        <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="从窗口拾取"
+                                                Command="{Binding PickMonitorProcessCommand}" />
+                                    </WrapPanel>
+                                    <ListBox Margin="0,12,0,0"
+                                             Style="{StaticResource PlainListBoxStyle}"
+                                             ItemContainerStyle="{StaticResource SoftListItemStyle}"
+                                             infra:ListBoxSelectionBehavior.AllowRepeatClickToClearSelection="True"
+                                             infra:ListBoxSelectionBehavior.SyncSelectionWithTextInputFocus="True"
+                                             ItemsSource="{Binding MonitorProcesses}"
+                                             SelectedItem="{Binding SelectedMonitorProcess}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:EditableStringItemViewModel}">
+                                                <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding CurrentPageKey, Converter={StaticResource PageKeyToVisibilityConverter}, ConverterParameter=notifications}">
+                            <GroupBox Header="通知开关">
+                                <StackPanel>
+                                    <CheckBox IsChecked="{Binding ManagedIndexNotifications}"
+                                              Content="索引建立或更新完成时通知"
+                                              ToolTip="managed_index_notifications" />
+                                    <CheckBox IsChecked="{Binding ManagedIndexFailureNotifications}"
+                                              Content="索引失败或跳过时通知"
+                                              ToolTip="managed_index_failure_notifications" />
+                                    <CheckBox IsChecked="{Binding MissingFontNotifications}"
+                                              Content="检测到字体缺失时通知"
+                                              ToolTip="missing_font_notifications" />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="字体缺失忽略通知"
+                                      ToolTip="notifications.missing_font_ignore">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHintStyle}"
+                                               Text="这里的每一项都是一条完整正则，用来忽略对应的字体缺失通知，可以单独设置是否忽略大小写。" />
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                Content="新增规则"
+                                                Command="{Binding AddMissingFontIgnoreCommand}" />
+                                        <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="删除"
+                                                Command="{Binding RemoveMissingFontIgnoreCommand}" />
+                                    </WrapPanel>
+                                    <ListBox Margin="0,12,0,0"
+                                             Style="{StaticResource PlainListBoxStyle}"
+                                             ItemContainerStyle="{StaticResource SoftListItemStyle}"
+                                             infra:ListBoxSelectionBehavior.AllowRepeatClickToClearSelection="True"
+                                             infra:ListBoxSelectionBehavior.SyncSelectionWithTextInputFocus="True"
+                                             ItemsSource="{Binding MissingFontIgnoreItems}"
+                                             SelectedItem="{Binding SelectedMissingFontIgnore}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:MissingFontIgnoreItemViewModel}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="12" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox IsChecked="{Binding IgnoreCase}"
+                                                              Content="忽略大小写"
+                                                              Margin="0,8,0,0"
+                                                              ToolTip="i: 前缀" />
+                                                    <TextBox Grid.Column="2"
+                                                             Text="{Binding Pattern, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="notifications.missing_font_ignore[]" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding CurrentPageKey, Converter={StaticResource PageKeyToVisibilityConverter}, ConverterParameter=rules}">
+                            <GroupBox Header="按进程字体缺失忽略通知"
+                                      ToolTip="notifications.process_missing_font_ignore">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHintStyle}"
+                                               Text="给不同进程分别设置忽略条件。命中这些规则后，该进程的字体缺失通知将不再显示。" />
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                Content="新增规则"
+                                                Command="{Binding AddProcessRuleCommand}" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <ItemsControl ItemsSource="{Binding ProcessRules}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:ProcessRuleViewModel}">
+                                        <Border Style="{StaticResource CardBorderStyle}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Summary}"
+                                                                   FontSize="18"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#162636"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,8,0,0"
+                                                                   Style="{StaticResource SectionHintStyle}"
+                                                                   Text="这条规则会在指定进程中匹配字体缺失名称，命中时不再通知。" />
+                                                    </StackPanel>
+
+                                                    <WrapPanel Grid.Column="1"
+                                                               Margin="16,0,0,0"
+                                                               HorizontalAlignment="Right">
+                                                        <Button Style="{StaticResource DangerButtonStyle}"
+                                                                Content="删除规则"
+                                                                Command="{Binding DataContext.RemoveProcessRuleCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </WrapPanel>
+                                                </Grid>
+
+                                                <CheckBox Margin="0,18,0,4"
+                                                          IsChecked="{Binding IgnoreCase}"
+                                                          Content="忽略大小写"
+                                                          ToolTip="flags = 'i'" />
+
+                                                <Grid Margin="0,10,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="18" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <StackPanel>
+                                                        <TextBlock Text="正则列表"
+                                                                   FontSize="15"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#223447" />
+                                                        <WrapPanel Margin="0,12,0,0">
+                                                            <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                                    Content="新增正则"
+                                                                    Command="{Binding AddRegexCommand}" />
+                                                            <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                                    Content="删除"
+                                                                    Command="{Binding RemoveRegexCommand}" />
+                                                        </WrapPanel>
+                                                        <ListBox Margin="0,12,0,0"
+                                                                 Style="{StaticResource PlainListBoxStyle}"
+                                                                 ItemContainerStyle="{StaticResource SoftListItemStyle}"
+                                                                 infra:ListBoxSelectionBehavior.AllowRepeatClickToClearSelection="True"
+                                                                 infra:ListBoxSelectionBehavior.SyncSelectionWithTextInputFocus="True"
+                                                                 ItemsSource="{Binding RegexItems}"
+                                                                 SelectedItem="{Binding SelectedRegexItem}">
+                                                            <ListBox.ItemTemplate>
+                                                                <DataTemplate DataType="{x:Type vm:EditableStringItemViewModel}">
+                                                                    <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
+                                                                </DataTemplate>
+                                                            </ListBox.ItemTemplate>
+                                                        </ListBox>
+                                                    </StackPanel>
+
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="进程列表"
+                                                                   FontSize="15"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#223447" />
+                                                        <WrapPanel Margin="0,12,0,0">
+                                                            <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                                    Content="新增进程"
+                                                                    Command="{Binding AddProcessCommand}" />
+                                                            <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                                    Content="删除"
+                                                                    Command="{Binding RemoveProcessCommand}" />
+                                                            <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                                    Content="选择 exe"
+                                                                    Command="{Binding DataContext.BrowseRuleProcessForCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" />
+                                                            <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                                    Content="从窗口拾取"
+                                                                    Command="{Binding DataContext.PickRuleProcessForCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}" />
+                                                        </WrapPanel>
+                                                        <ListBox Margin="0,12,0,0"
+                                                                 Style="{StaticResource PlainListBoxStyle}"
+                                                                 ItemContainerStyle="{StaticResource SoftListItemStyle}"
+                                                                 infra:ListBoxSelectionBehavior.AllowRepeatClickToClearSelection="True"
+                                                                 infra:ListBoxSelectionBehavior.SyncSelectionWithTextInputFocus="True"
+                                                                 ItemsSource="{Binding ProcessItems}"
+                                                                 SelectedItem="{Binding SelectedProcessItem}">
+                                                            <ListBox.ItemTemplate>
+                                                                <DataTemplate DataType="{x:Type vm:EditableStringItemViewModel}">
+                                                                    <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
+                                                                </DataTemplate>
+                                                            </ListBox.ItemTemplate>
+                                                        </ListBox>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+
+                        <StackPanel Visibility="{Binding CurrentPageKey, Converter={StaticResource PageKeyToVisibilityConverter}, ConverterParameter=index}">
+                            <GroupBox Header="索引文件"
+                                      ToolTip="index_files">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHintStyle}"
+                                               Text="每个索引项对应一个索引文件和一组字体来源目录。" />
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                Content="新增索引项"
+                                                Command="{Binding AddIndexFileCommand}" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <ItemsControl ItemsSource="{Binding IndexFiles}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:IndexFileViewModel}">
+                                        <Border Style="{StaticResource CardBorderStyle}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}"
+                                                                   FontSize="18"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#162636"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,8,0,0"
+                                                                   Text="{Binding Subtitle}"
+                                                                   Style="{StaticResource SectionHintStyle}" />
+                                                    </StackPanel>
+
+                                                    <WrapPanel Grid.Column="1"
+                                                               Margin="16,0,0,0"
+                                                               HorizontalAlignment="Right">
+                                                        <Button Style="{StaticResource DangerButtonStyle}"
+                                                                Content="删除索引项"
+                                                                Command="{Binding DataContext.RemoveIndexFileCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </WrapPanel>
+                                                </Grid>
+
+                                                <TextBlock Margin="0,18,0,0"
+                                                           Text="索引文件路径"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#223447"
+                                                           ToolTip="path" />
+                                                <Grid Margin="0,8,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" />
+                                                    <Button Grid.Column="1"
+                                                            Margin="12,6,0,0"
+                                                            Style="{StaticResource SecondaryButtonStyle}"
+                                                            Content="选择路径"
+                                                            Command="{Binding DataContext.BrowseIndexPathForCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                </Grid>
+
+                                                <TextBlock Margin="0,18,0,0"
+                                                           Text="字体来源目录"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#223447"
+                                                           ToolTip="source_folders" />
+                                                <WrapPanel Margin="0,12,0,0">
+                                                    <Button Style="{StaticResource PrimaryButtonStyle}"
+                                                            Content="新增目录"
+                                                            Command="{Binding AddSourceFolderCommand}" />
+                                                    <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                            Content="删除"
+                                                            Command="{Binding RemoveSourceFolderCommand}" />
+                                                    <Button Style="{StaticResource SecondaryButtonStyle}"
+                                                            Content="选择文件夹"
+                                                            Command="{Binding DataContext.BrowseSourceFolderForCardCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                </WrapPanel>
+                                                <ListBox Margin="0,12,0,0"
+                                                         Style="{StaticResource PlainListBoxStyle}"
+                                                         ItemContainerStyle="{StaticResource SoftListItemStyle}"
+                                                         infra:ListBoxSelectionBehavior.AllowRepeatClickToClearSelection="True"
+                                                         infra:ListBoxSelectionBehavior.SyncSelectionWithTextInputFocus="True"
+                                                         ItemsSource="{Binding SourceFolders}"
+                                                         SelectedItem="{Binding SelectedSourceFolder}">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type vm:EditableStringItemViewModel}">
+                                                            <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" />
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Grid.Column="0"
+                Grid.ColumnSpan="3"
+                Margin="0,20,0,0"
+                Background="#FFF9F3"
+                BorderBrush="#E7DBC8"
+                BorderThickness="1"
+                CornerRadius="22"
+                Padding="18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="配置文件路径"
+                               FontSize="12"
+                               Foreground="#6F7C89" />
+                    <TextBlock Margin="0,4,0,0"
+                               Text="{Binding ConfigPath}"
+                               FontSize="13"
+                               Foreground="#213243"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <WrapPanel Grid.Column="1"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center">
+                    <Button Style="{StaticResource SecondaryButtonStyle}"
+                            Content="重新加载"
+                            Command="{Binding ReloadCommand}" />
+                    <Button Style="{StaticResource PrimaryButtonStyle}"
+                            Content="保存"
+                            Command="{Binding SaveCommand}" />
+                    <Button Style="{StaticResource DangerButtonStyle}"
+                            Content="关闭"
+                            Command="{Binding CloseCommand}" />
+                </WrapPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

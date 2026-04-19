@@ -112,6 +112,7 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       shell: pwsh
       run: |
+        dotnet build SubtitleFontHelperConfigWpf\SubtitleFontHelperConfigWpf.csproj -c $env:BUILD_CONFIGURATION
         .\copyFiles.ps1
 
     - name: Resolve release tag

@@ -23,3 +23,5 @@ Copy-Item "../Build/x64/$configuration/FontLoadInterceptor64.dll" "." -Force
 Copy-Item "../Build/x64/$configuration/Generated64.dll" "." -Force
 Copy-Item "../Build/x64/$configuration/FontDatabaseBuilder.exe" "." -Force
 Copy-Item "../Build/x64/$configuration/SubtitleFontAutoLoaderDaemon.exe" "." -Force
+Copy-Item "../SubtitleFontHelperConfigWpf/bin/$configuration/net46/SubtitleFontHelperConfigWpf.exe" "." -Force
+Copy-Item "../SubtitleFontHelperConfigWpf/bin/$configuration/net46/SubtitleFontHelperConfigWpf.exe.config" "." -Force

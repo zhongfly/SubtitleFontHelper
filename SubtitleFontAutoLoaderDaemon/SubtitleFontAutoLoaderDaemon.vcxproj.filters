@@ -141,4 +141,12 @@
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="done.gif">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="loading.gif">
+      <Filter>Resource Files</Filter>
+    </None>
+  </ItemGroup>
 </Project>

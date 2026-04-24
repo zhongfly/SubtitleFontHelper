@@ -63,6 +63,10 @@ IDI_TRAYICON            ICON                    "icon.ico"
 
 IDI_TRAYICONLOADING     ICON                    "icon-loading.ico"
 
+IDR_LOADINGGIF          RCDATA                  "loading.gif"
+
+IDR_DONEGIF             RCDATA                  "done.gif"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //

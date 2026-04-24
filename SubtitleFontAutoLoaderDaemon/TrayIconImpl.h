@@ -14,10 +14,15 @@
 #include <Richedit.h>
 #include <shellapi.h>
 #include <strsafe.h>
+#include <Objbase.h>
+#include <ObjIdl.h>
+#include <gdiplus.h>
+#include <wil/com.h>
 #include <wil/win32_helpers.h>
 #include <wil/resource.h>
 
 #pragma comment(lib, "Comctl32.lib")
+#pragma comment(lib, "Gdiplus.lib")
 
 class sfh::SystemTray::Implementation
 {
@@ -30,7 +35,19 @@ private:
 	constexpr static UINT_PTR LOGS_REFRESH_TIMER_ID = 3;
 	static constexpr auto FONTS_SEARCH_DEBOUNCE_INTERVAL_MS = 200;
 	static constexpr auto LOGS_REFRESH_INTERVAL_MS = 1000;
-	static constexpr auto TRAY_REFRESH_INTERVAL_MS = 1000;
+	static constexpr auto TRAY_IDLE_REFRESH_INTERVAL_MS = 1000;
+	static constexpr auto TRAY_DEFAULT_FRAME_DELAY_MS = 100;
+	static constexpr auto TRAY_MIN_FRAME_DELAY_MS = 40;
+	static constexpr auto TRAY_ICON_ORIGIN = 0;
+	static constexpr auto TRAY_ICON_MASK_PLANES = 1;
+	static constexpr auto TRAY_ICON_MASK_BITS_PER_PIXEL = 1;
+	static constexpr auto TRAY_ICON_COLOR_PLANES = 1;
+	static constexpr auto TRAY_ICON_COLOR_BITS_PER_PIXEL = 32;
+	static constexpr auto TRAY_ICON_ALPHA_MASK = 0xFF000000;
+	static constexpr auto TRAY_ICON_CHECK_DURATION_MS = 2000;
+	static constexpr auto TRAY_WHITE_TRANSPARENT_THRESHOLD = 250;
+	static constexpr UINT TRAY_DONE_FIRST_FRAME_INDEX = 9;
+	static constexpr auto TRAY_LOADING_BLUE = RGB(35, 115, 255);
 	static constexpr wchar_t TRAY_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonTray";
 	static constexpr wchar_t TOOL_WINDOW_CLASS_NAME[] = L"AutoLoaderDaemonToolWindow";
 	static constexpr int IDC_FONTS_SEARCH_EDIT = 1001;
@@ -125,6 +142,19 @@ private:
 		const wchar_t* m_text = L"";
 	};
 
+	struct TrayAnimationFrame
+	{
+		wil::unique_hicon m_icon;
+		UINT m_delayMs = TRAY_DEFAULT_FRAME_DELAY_MS;
+	};
+
+	struct TrayAnimationCache
+	{
+		std::vector<TrayAnimationFrame> m_loadingFrames;
+		std::vector<TrayAnimationFrame> m_doneFrames;
+		int m_iconSize = 0;
+	};
+
 	NOTIFYICONDATAW m_iconData = {};
 	HWND m_hWnd = nullptr;
 	HWND m_fontsWindow = nullptr;
@@ -157,8 +187,16 @@ private:
 	HBRUSH m_metadataBackgroundBrush = nullptr;
 	HBRUSH m_logBackgroundBrush = nullptr;
 	HBRUSH m_inputBackgroundBrush = nullptr;
+	HICON m_currentOwnedTrayIcon = nullptr;
+	ULONG_PTR m_gdiplusToken = 0;
+	wil::com_ptr<IStream> m_loadingGifStream;
+	wil::com_ptr<IStream> m_doneGifStream;
+	std::shared_ptr<TrayAnimationCache> m_trayAnimationCache;
+	std::shared_ptr<TrayAnimationCache> m_currentTrayAnimationCache;
 	ThemeColors m_colors = LIGHT_COLORS;
 	bool m_darkModeEnabled = false;
+	bool m_previousTrayLoading = false;
+	bool m_showTrayCompleteCheck = false;
 	std::thread m_trayThread;
 
 	IDaemon* m_daemon;
@@ -180,6 +218,9 @@ private:
 	std::vector<std::wstring> m_fontsResultTooltips;
 	std::vector<FontSearchResult> m_fontsCurrentResults;
 	ULONGLONG m_logsLastFileSize = 0;
+	ULONGLONG m_doneTrayLastFrameStarted = 0;
+	size_t m_loadingTrayAnimationFrame = 0;
+	size_t m_doneTrayAnimationFrame = 0;
 	FILETIME m_logsLastWriteTime = {};
 	bool m_logsHasObservedFile = false;
 	bool m_logsLastReadFailed = false;
@@ -216,10 +257,22 @@ private:
 	void RefreshThemeForOpenWindows();
 
 	// Core (tray icon, message loop)
+	static int GetTrayIconPixelSize();
+	static UINT NormalizeGifFrameDelay(UINT delayMs);
+	static BYTE CalculateLoadingTintAlpha(BYTE red, BYTE green, BYTE blue, BYTE alpha);
+	static bool IsWhitePixelForTrayTransparency(BYTE red, BYTE green, BYTE blue, BYTE alpha);
+	void EnsureGdiplusStarted();
+	IStream* EnsureGifResourceStream(UINT resourceId, wil::com_ptr<IStream>& stream);
+	std::shared_ptr<TrayAnimationCache> EnsureTrayAnimationCache();
+	std::vector<TrayAnimationFrame> LoadTrayAnimationFrames(UINT resourceId, bool tintBlackToBlue, UINT firstFrameIndex, int iconSize);
+	HICON CreateTrayIconFromBitmap(Gdiplus::Bitmap& bitmap, int iconSize, bool tintBlackToBlue);
+	HICON CopyBaseTrayIcon();
 	bool IsLoading() const;
 	std::wstring BuildLoadingTooltip() const;
+	HICON SelectTrayIcon(bool loading, bool completeCheck, bool& ownsIcon, std::shared_ptr<TrayAnimationCache>& cacheOwner);
+	void DestroyCurrentOwnedTrayIcon();
 	void SetupMessageWindow();
-	void SetupTrayIcon(bool add);
+	void SetupTrayIcon(bool add, bool advanceAnimation);
 	void DestroyTrayIcon();
 	static void MessageLoop();
 	LRESULT CALLBACK MessageHandler(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);

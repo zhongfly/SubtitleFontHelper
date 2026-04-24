@@ -282,6 +282,8 @@
   <ItemGroup>
     <Image Include="icon-loading.ico" />
     <Image Include="icon.ico" />
+    <None Include="done.gif" />
+    <None Include="loading.gif" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

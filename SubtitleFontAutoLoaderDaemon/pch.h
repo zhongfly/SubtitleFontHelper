@@ -17,3 +17,9 @@
 #include <limits>
 #include <filesystem>
 #include <string_view>
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+#include <cstdint>
+#include <cctype>
+#include <cstdlib>

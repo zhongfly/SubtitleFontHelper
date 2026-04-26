@@ -39,6 +39,10 @@ namespace
 	struct FontUiStore
 	{
 		sfh::FontUiSnapshot m_snapshot;
+	};
+
+	struct FontUiSearchStore
+	{
 		std::vector<SearchableFontEntry> m_searchEntries;
 	};
 
@@ -207,15 +211,15 @@ namespace
 	}
 
 	SearchableFontEntryBuilder BuildSearchableFontEntry(
-		const sfh::LoadedFontDatabase& loadedDatabase,
+		const std::filesystem::path& indexPath,
 		const sfh::FontDatabase::FontFaceElement& font)
 	{
 		SearchableFontEntryBuilder entry;
 		entry.m_entry.m_result.m_displayName = sfh::GetManagedIndexPreferredFontName(font);
 		entry.m_entry.m_result.m_fontPath = font.m_path.Get();
 		entry.m_entry.m_result.m_faceIndex = font.m_index;
-		entry.m_indexPaths.push_back(loadedDatabase.m_indexPath.wstring());
-		entry.m_indexPathKeys.insert(ToLowerCopy(loadedDatabase.m_indexPath.wstring()));
+		entry.m_indexPaths.push_back(indexPath.wstring());
+		entry.m_indexPathKeys.insert(ToLowerCopy(indexPath.wstring()));
 		AppendFontMetadata(entry, font);
 		return entry;
 	}
@@ -288,8 +292,6 @@ namespace
 	std::shared_ptr<const FontUiStore> BuildFontUiStore(const std::vector<sfh::LoadedFontDatabase>& loadedDatabases)
 	{
 		auto store = std::make_shared<FontUiStore>();
-		std::unordered_map<std::wstring, size_t> faceToEntryIndex;
-		std::vector<SearchableFontEntryBuilder> searchEntryBuilders;
 		store->m_snapshot.m_isLoaded = true;
 		store->m_snapshot.m_hasStaleData = false;
 		store->m_snapshot.m_statusMessage = BuildFontUiStatusMessage(loadedDatabases.size());
@@ -297,24 +299,43 @@ namespace
 		for (const auto& loadedDatabase : loadedDatabases)
 		{
 			store->m_snapshot.m_indexSummaries.push_back(BuildFontIndexSummary(loadedDatabase));
-			if (loadedDatabase.m_database != nullptr)
+		}
+		return store;
+	}
+
+	std::shared_ptr<const FontUiSearchStore> BuildFontUiSearchStore(
+		const std::vector<std::unique_ptr<sfh::FontDatabase>>& databases,
+		const std::vector<std::filesystem::path>& indexPaths)
+	{
+		THROW_HR_IF(E_UNEXPECTED, databases.size() != indexPaths.size());
+
+		auto store = std::make_shared<FontUiSearchStore>();
+		std::unordered_map<std::wstring, size_t> faceToEntryIndex;
+		std::vector<SearchableFontEntryBuilder> searchEntryBuilders;
+		for (size_t databaseIndex = 0; databaseIndex < databases.size(); ++databaseIndex)
+		{
+			const auto& database = databases[databaseIndex];
+			if (database == nullptr)
 			{
-				for (const auto& font : loadedDatabase.m_database->m_fonts)
+				continue;
+			}
+
+			const auto& indexPath = indexPaths[databaseIndex];
+			for (const auto& font : database->m_fonts)
+			{
+				auto faceKey = ToLowerCopy(font.m_path.Get());
+				faceKey += L"\x1f";
+				faceKey += std::to_wstring(font.m_index);
+				auto existing = faceToEntryIndex.find(faceKey);
+				if (existing == faceToEntryIndex.end())
 				{
-					auto faceKey = ToLowerCopy(font.m_path.Get());
-					faceKey += L"\x1f";
-					faceKey += std::to_wstring(font.m_index);
-					auto existing = faceToEntryIndex.find(faceKey);
-					if (existing == faceToEntryIndex.end())
-					{
-						faceToEntryIndex.emplace(std::move(faceKey), searchEntryBuilders.size());
-						searchEntryBuilders.push_back(BuildSearchableFontEntry(loadedDatabase, font));
-					}
-					else
-					{
-						AppendIndexPath(searchEntryBuilders[existing->second], loadedDatabase.m_indexPath);
-						AppendFontMetadata(searchEntryBuilders[existing->second], font);
-					}
+					faceToEntryIndex.emplace(std::move(faceKey), searchEntryBuilders.size());
+					searchEntryBuilders.push_back(BuildSearchableFontEntry(indexPath, font));
+				}
+				else
+				{
+					AppendIndexPath(searchEntryBuilders[existing->second], indexPath);
+					AppendFontMetadata(searchEntryBuilders[existing->second], font);
 				}
 			}
 		}
@@ -575,14 +596,16 @@ namespace
 class sfh::QueryService::Implementation : public sfh::IRpcRequestHandler
 {
 private:
-	std::mutex m_accessLock;
+	mutable std::mutex m_accessLock;
 
 	QueryTrie<FontDatabase::FontFaceElement, false> m_fullName;
 	QueryTrie<FontDatabase::FontFaceElement, false> m_postScriptName;
 	QueryTrie<FontDatabase::FontFaceElement, true> m_win32FamilyName;
 	std::unordered_map<const FontDatabase::FontFaceElement*, size_t> m_fontPriority;
 	std::vector<std::unique_ptr<FontDatabase>> m_dbs;
+	std::vector<std::filesystem::path> m_loadedIndexPaths;
 	std::atomic<std::shared_ptr<const FontUiStore>> m_fontUiStore;
+	mutable std::shared_ptr<const FontUiSearchStore> m_fontUiSearchStore;
 
 	IDaemon* m_daemon;
 
@@ -627,7 +650,9 @@ public:
 		std::unordered_map<const FontDatabase::FontFaceElement*, size_t> fontPriority;
 		auto fontUiStore = BuildFontUiStore(loadedDatabases);
 		std::vector<std::unique_ptr<FontDatabase>> dbs;
+		std::vector<std::filesystem::path> indexPaths;
 		dbs.reserve(loadedDatabases.size());
+		indexPaths.reserve(loadedDatabases.size());
 		for (size_t priority = 0; priority < loadedDatabases.size(); ++priority)
 		{
 			auto db = std::move(loadedDatabases[priority].m_database);
@@ -654,6 +679,7 @@ public:
 					}
 				}
 			}
+			indexPaths.push_back(loadedDatabases[priority].m_indexPath);
 			dbs.push_back(std::move(db));
 		}
 
@@ -668,10 +694,12 @@ public:
 
 		std::lock_guard lg(m_accessLock);
 		m_dbs = std::move(dbs);
+		m_loadedIndexPaths = std::move(indexPaths);
 		m_win32FamilyName = std::move(win32FamilyName);
 		m_fullName = std::move(fullName);
 		m_postScriptName = std::move(postScriptName);
 		m_fontPriority = std::move(fontPriority);
+		m_fontUiSearchStore.reset();
 		m_fontUiStore.store(std::move(fontUiStore), std::memory_order_release);
 		if (publishVersion)
 		{
@@ -683,6 +711,15 @@ public:
 	{
 		std::lock_guard lg(m_accessLock);
 		UpdateVerison();
+	}
+
+	std::shared_ptr<const FontUiSearchStore> CaptureFontUiSearchStoreLocked() const
+	{
+		if (!m_fontUiSearchStore)
+		{
+			m_fontUiSearchStore = BuildFontUiSearchStore(m_dbs, m_loadedIndexPaths);
+		}
+		return m_fontUiSearchStore;
 	}
 
 	FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) const
@@ -702,8 +739,20 @@ public:
 			return snapshot;
 		}
 
+		std::lock_guard lg(m_accessLock);
+		store = m_fontUiStore.load(std::memory_order_acquire);
+		if (!store)
+		{
+			return BuildInitialFontUiSnapshot();
+		}
+
+		snapshot = store->m_snapshot;
+		snapshot.m_searchResults.clear();
+		snapshot.m_totalSearchResultCount = 0;
+		snapshot.m_isSearchResultTruncated = false;
+		auto searchStore = CaptureFontUiSearchStoreLocked();
 		auto normalizedQuery = ToLowerCopy(std::wstring(query));
-		for (const auto& entry : store->m_searchEntries)
+		for (const auto& entry : searchStore->m_searchEntries)
 		{
 			if (entry.m_searchKey.find(normalizedQuery) == std::wstring::npos)
 			{

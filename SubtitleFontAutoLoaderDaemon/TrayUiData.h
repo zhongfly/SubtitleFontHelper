@@ -42,5 +42,6 @@ namespace sfh
 	public:
 		virtual ~ITrayUiDataProvider() = default;
 		virtual FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) = 0;
+		virtual void ReleaseFontUiSearchCache() = 0;
 	};
 }

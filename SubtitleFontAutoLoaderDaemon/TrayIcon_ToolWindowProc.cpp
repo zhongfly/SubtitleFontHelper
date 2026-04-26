@@ -262,6 +262,10 @@ LRESULT sfh::SystemTray::Implementation::HandleToolWindowMessage(HWND hWnd, UINT
 	case WM_NCDESTROY:
 		if (hWnd == m_fontsWindow)
 		{
+			if (m_trayUiDataProvider != nullptr)
+			{
+				m_trayUiDataProvider->ReleaseFontUiSearchCache();
+			}
 			m_fontsWindow = nullptr;
 			m_fontsTitleLabel = nullptr;
 			m_fontsStatusLabel = nullptr;

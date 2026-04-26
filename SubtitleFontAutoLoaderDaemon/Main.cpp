@@ -463,6 +463,14 @@ namespace sfh
 			return m_service->m_queryService->CaptureFontUiSnapshot(query);
 		}
 
+		void ReleaseFontUiSearchCache() override
+		{
+			std::lock_guard lg(m_serviceAccessLock);
+			if (m_service == nullptr || m_service->m_queryService == nullptr)
+				return;
+			m_service->m_queryService->ReleaseFontUiSearchCache();
+		}
+
 		int DaemonMain(const std::vector<std::wstring>& cmdline)
 		{
 			std::unique_lock ul(m_queueLock);

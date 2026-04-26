@@ -772,6 +772,12 @@ public:
 		return snapshot;
 	}
 
+	void ReleaseFontUiSearchCache()
+	{
+		std::lock_guard lg(m_accessLock);
+		m_fontUiSearchStore.reset();
+	}
+
 	size_t GetPriority(const FontDatabase::FontFaceElement* face) const
 	{
 		auto result = m_fontPriority.find(face);
@@ -956,6 +962,11 @@ void sfh::QueryService::PublishVersion()
 sfh::FontUiSnapshot sfh::QueryService::CaptureFontUiSnapshot(std::wstring_view query) const
 {
 	return m_impl->CaptureFontUiSnapshot(query);
+}
+
+void sfh::QueryService::ReleaseFontUiSearchCache()
+{
+	m_impl->ReleaseFontUiSearchCache();
 }
 
 sfh::IRpcRequestHandler* sfh::QueryService::GetRpcRequestHandler()

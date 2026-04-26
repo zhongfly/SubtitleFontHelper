@@ -36,6 +36,7 @@ namespace sfh
 		void Load(std::vector<LoadedFontDatabase>&& dbs, bool publishVersion = true);
 		void PublishVersion();
 		FontUiSnapshot CaptureFontUiSnapshot(std::wstring_view query) const;
+		void ReleaseFontUiSearchCache();
 
 		IRpcRequestHandler* GetRpcRequestHandler();
 	};

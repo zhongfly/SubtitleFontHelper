@@ -3,13 +3,69 @@
 #include <filesystem>
 #include <regex>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "Prefetch.h"
 #include "Common.h"
+#include "EventLog.h"
 #include "ToastNotifier.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+
+namespace
+{
+	constexpr DWORD PREFETCH_FONT_RESOURCE_FLAGS = FR_PRIVATE | FR_NOT_ENUM;
+
+	std::string BuildFontResourceErrorMessage(const char* operation, const std::wstring& path)
+	{
+		const auto error = GetLastError();
+		std::string message = operation;
+		message += " failed: ";
+		message += sfh::WideToUtf8String(path);
+		if (error != ERROR_SUCCESS)
+		{
+			message += " (Win32 error ";
+			message += std::to_string(error);
+			message += ")";
+		}
+		return message;
+	}
+
+	void AddPrefetchedFontResource(const std::wstring& path)
+	{
+		SetLastError(ERROR_SUCCESS);
+		const int addedCount = AddFontResourceExW(path.c_str(), PREFETCH_FONT_RESOURCE_FLAGS, nullptr);
+		if (addedCount == 0)
+		{
+			throw std::runtime_error(BuildFontResourceErrorMessage("AddFontResourceExW", path));
+		}
+	}
+
+	void RemovePrefetchedFontResource(const std::wstring& path)
+	{
+		SetLastError(ERROR_SUCCESS);
+		if (RemoveFontResourceExW(path.c_str(), PREFETCH_FONT_RESOURCE_FLAGS, nullptr) == FALSE)
+		{
+			throw std::runtime_error(BuildFontResourceErrorMessage("RemoveFontResourceExW", path));
+		}
+	}
+
+	void TryLogPrefetchCleanupFailure(const wchar_t* operation, const std::exception& e)
+	{
+		try
+		{
+			sfh::EventLog::GetInstance().LogDebugMessage(
+				L"prefetch cleanup failed: operation=%ls error=\"%ls\"",
+				operation,
+				sfh::Utf8ToWideString(e.what()).c_str());
+		}
+		catch (...)
+		{
+		}
+	}
+}
 
 template <typename T>
 class SimpleLRU
@@ -74,47 +130,73 @@ public:
 		m_nodes.reserve(initialSize);
 	}
 
-	bool Put(T&& value)
+	bool HasCapacity() const
+	{
+		return m_capacity != 0;
+	}
+
+	bool Contains(const T& value)
+	{
+		std::lock_guard lg(m_lock);
+		auto findResult = m_hashmap.find(value);
+		if (findResult == m_hashmap.end())
+		{
+			return false;
+		}
+		AdjustToHead(*findResult->second, true);
+		return true;
+	}
+
+	std::optional<T> PutNew(T&& value)
 	{
 		std::lock_guard lg(m_lock);
 		if (m_capacity == 0)
 		{
-			return false;
+			return std::nullopt;
 		}
 		auto findResult = m_hashmap.find(value);
 		if (m_hashmap.end() == findResult)
 		{
-			// not found
 			if (m_nodes.size() == m_capacity)
 			{
-				// full
 				auto lastNode = m_end.m_prev;
-				m_hashmap.erase(lastNode->m_data);
-				m_hashmap.insert({value, lastNode});
-				lastNode->m_data = std::move(value);
-				AdjustToHead(*lastNode, true);
+				T evicted = lastNode->m_data;
+				T newValue = std::move(value);
+				auto inserted = m_hashmap.emplace(newValue, lastNode);
+				try
+				{
+					lastNode->m_data = std::move(newValue);
+					m_hashmap.erase(evicted);
+					AdjustToHead(*lastNode, true);
+					return evicted;
+				}
+				catch (...)
+				{
+					m_hashmap.erase(inserted.first);
+					throw;
+				}
 			}
 			else
 			{
+				T newValue = std::move(value);
 				m_nodes.emplace_back();
 				auto node = &m_nodes.back();
-				m_hashmap.insert({value, node});
-				node->m_data = std::move(value);
-				AdjustToHead(*node, false);
+				try
+				{
+					node->m_data = std::move(newValue);
+					m_hashmap.emplace(node->m_data, node);
+					AdjustToHead(*node, false);
+				}
+				catch (...)
+				{
+					m_nodes.pop_back();
+					throw;
+				}
 			}
-			return true;
+			return std::nullopt;
 		}
-		else
-		{
-			AdjustToHead(*findResult->second, true);
-			return false;
-		}
-	}
-
-	bool Put(const T& value)
-	{
-		T v = value;
-		return Put(std::move(v));
+		AdjustToHead(*findResult->second, true);
+		return std::nullopt;
 	}
 
 	std::vector<T> GetVector()
@@ -148,6 +230,8 @@ class sfh::Prefetch::Implementation : public sfh::IRpcFeedbackHandler
 	bool m_missingFontNotificationsEnabled = true;
 	std::vector<CompiledRegexRule> m_missingFontIgnore;
 	std::vector<CompiledProcessRule> m_processMissingFontIgnore;
+	std::mutex m_resourceLock;
+	std::unordered_set<std::wstring> m_loadedFontResources;
 
 	std::wstring m_cachePath;
 
@@ -171,18 +255,121 @@ public:
 
 	~Implementation()
 	{
-		SaveLruCache(m_cachePath);
+		try
+		{
+			SaveLruCache(m_cachePath);
+		}
+		catch (const std::exception& e)
+		{
+			TryLogPrefetchCleanupFailure(L"save lru cache", e);
+		}
+
+		try
+		{
+			UnloadPrefetchedFontResources();
+		}
+		catch (const std::exception& e)
+		{
+			TryLogPrefetchCleanupFailure(L"unload font resources", e);
+		}
 	}
 
 	void Load(const std::wstring& path)
 	{
-		if (m_lru.Put(path))
+		std::lock_guard lg(m_resourceLock);
+		if (!m_lru.HasCapacity() || m_lru.Contains(path))
 		{
-			AddFontResourceExW(path.c_str(), FR_PRIVATE | FR_NOT_ENUM, nullptr);
+			return;
+		}
+
+		const bool addedResource = TrackPrefetchedFontResource(path);
+		std::optional<std::wstring> evicted;
+		try
+		{
+			evicted = m_lru.PutNew(std::wstring(path));
+		}
+		catch (...)
+		{
+			if (addedResource)
+			{
+				TryUnloadTrackedFontResource(path, L"rollback font resource");
+			}
+			throw;
+		}
+
+		if (evicted.has_value())
+		{
+			TryUnloadTrackedFontResource(*evicted, L"evict font resource");
 		}
 	}
 
 private:
+	bool TrackPrefetchedFontResource(const std::wstring& path)
+	{
+		if (m_loadedFontResources.find(path) != m_loadedFontResources.end())
+		{
+			return false;
+		}
+
+		AddPrefetchedFontResource(path);
+		try
+		{
+			m_loadedFontResources.emplace(path);
+			return true;
+		}
+		catch (...)
+		{
+			try
+			{
+				RemovePrefetchedFontResource(path);
+			}
+			catch (...)
+			{
+			}
+			throw;
+		}
+	}
+
+	void UnloadTrackedFontResource(const std::wstring& path)
+	{
+		auto loaded = m_loadedFontResources.find(path);
+		if (loaded == m_loadedFontResources.end())
+		{
+			return;
+		}
+
+		RemovePrefetchedFontResource(path);
+		m_loadedFontResources.erase(loaded);
+	}
+
+	void TryUnloadTrackedFontResource(const std::wstring& path, const wchar_t* operation)
+	{
+		try
+		{
+			UnloadTrackedFontResource(path);
+		}
+		catch (const std::exception& e)
+		{
+			TryLogPrefetchCleanupFailure(operation, e);
+		}
+	}
+
+	void UnloadPrefetchedFontResources()
+	{
+		std::lock_guard lg(m_resourceLock);
+		std::vector<std::wstring> snapshot;
+		snapshot.reserve(m_loadedFontResources.size());
+		for (const auto& path : m_loadedFontResources)
+		{
+			snapshot.push_back(path);
+		}
+
+		for (const auto& path : snapshot)
+		{
+			TryUnloadTrackedFontResource(path, L"unload font resource");
+		}
+	}
+
 	static bool HasIgnoreCaseFlag(const std::wstring& flags)
 	{
 		return flags.find(L'i') != std::wstring::npos;

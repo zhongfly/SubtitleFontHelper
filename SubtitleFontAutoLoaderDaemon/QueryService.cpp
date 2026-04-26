@@ -20,6 +20,11 @@ namespace
 	{
 		sfh::FontSearchResult m_result;
 		std::wstring m_searchKey;
+	};
+
+	struct SearchableFontEntryBuilder
+	{
+		SearchableFontEntry m_entry;
 		std::vector<std::wstring> m_indexPaths;
 		std::unordered_set<std::wstring> m_indexPathKeys;
 		std::vector<std::wstring> m_familyNames;
@@ -72,7 +77,7 @@ namespace
 		return result;
 	}
 
-	void AppendSearchKeyPart(SearchableFontEntry& entry, const std::wstring& value)
+	void AppendSearchKeyPart(SearchableFontEntryBuilder& entry, const std::wstring& value)
 	{
 		auto key = ToLowerCopy(value);
 		if (key.empty() || !entry.m_searchKeyParts.insert(key).second)
@@ -80,11 +85,11 @@ namespace
 			return;
 		}
 
-		if (!entry.m_searchKey.empty())
+		if (!entry.m_entry.m_searchKey.empty())
 		{
-			entry.m_searchKey += L'\n';
+			entry.m_entry.m_searchKey += L'\n';
 		}
-		entry.m_searchKey += key;
+		entry.m_entry.m_searchKey += key;
 	}
 
 	void AppendDisplayName(std::vector<std::wstring>& values, std::unordered_set<std::wstring>& keys, const std::wstring& value)
@@ -96,16 +101,16 @@ namespace
 		}
 	}
 
-	void SyncSearchEntryResult(SearchableFontEntry& entry)
+	void SyncSearchEntryResult(SearchableFontEntryBuilder& entry)
 	{
-		entry.m_result.m_familyNames = JoinSortedNames(entry.m_familyNames);
-		entry.m_result.m_fullNames = JoinSortedNames(entry.m_fullNames);
-		entry.m_result.m_postScriptNames = JoinSortedNames(entry.m_postScriptNames);
-		entry.m_result.m_indexPath = JoinSortedNames(entry.m_indexPaths);
+		entry.m_entry.m_result.m_familyNames = JoinSortedNames(entry.m_familyNames);
+		entry.m_entry.m_result.m_fullNames = JoinSortedNames(entry.m_fullNames);
+		entry.m_entry.m_result.m_postScriptNames = JoinSortedNames(entry.m_postScriptNames);
+		entry.m_entry.m_result.m_indexPath = JoinSortedNames(entry.m_indexPaths);
 	}
 
 	void AppendSearchName(
-		SearchableFontEntry& entry,
+		SearchableFontEntryBuilder& entry,
 		const sfh::FontDatabase::FontFaceElement::NameElement& name)
 	{
 		AppendSearchKeyPart(entry, name.m_name);
@@ -125,7 +130,7 @@ namespace
 	}
 
 	void AppendFontMetadata(
-		SearchableFontEntry& entry,
+		SearchableFontEntryBuilder& entry,
 		const sfh::FontDatabase::FontFaceElement& font)
 	{
 		for (const auto& name : font.m_names)
@@ -201,21 +206,21 @@ namespace
 		return summary;
 	}
 
-	SearchableFontEntry BuildSearchableFontEntry(
+	SearchableFontEntryBuilder BuildSearchableFontEntry(
 		const sfh::LoadedFontDatabase& loadedDatabase,
 		const sfh::FontDatabase::FontFaceElement& font)
 	{
-		SearchableFontEntry entry;
-		entry.m_result.m_displayName = sfh::GetManagedIndexPreferredFontName(font);
-		entry.m_result.m_fontPath = font.m_path.Get();
-		entry.m_result.m_faceIndex = font.m_index;
+		SearchableFontEntryBuilder entry;
+		entry.m_entry.m_result.m_displayName = sfh::GetManagedIndexPreferredFontName(font);
+		entry.m_entry.m_result.m_fontPath = font.m_path.Get();
+		entry.m_entry.m_result.m_faceIndex = font.m_index;
 		entry.m_indexPaths.push_back(loadedDatabase.m_indexPath.wstring());
 		entry.m_indexPathKeys.insert(ToLowerCopy(loadedDatabase.m_indexPath.wstring()));
 		AppendFontMetadata(entry, font);
 		return entry;
 	}
 
-	void AppendIndexPath(SearchableFontEntry& entry, const std::filesystem::path& indexPath)
+	void AppendIndexPath(SearchableFontEntryBuilder& entry, const std::filesystem::path& indexPath)
 	{
 		auto display = indexPath.wstring();
 		auto key = ToLowerCopy(display);
@@ -284,6 +289,7 @@ namespace
 	{
 		auto store = std::make_shared<FontUiStore>();
 		std::unordered_map<std::wstring, size_t> faceToEntryIndex;
+		std::vector<SearchableFontEntryBuilder> searchEntryBuilders;
 		store->m_snapshot.m_isLoaded = true;
 		store->m_snapshot.m_hasStaleData = false;
 		store->m_snapshot.m_statusMessage = BuildFontUiStatusMessage(loadedDatabases.size());
@@ -301,16 +307,22 @@ namespace
 					auto existing = faceToEntryIndex.find(faceKey);
 					if (existing == faceToEntryIndex.end())
 					{
-						faceToEntryIndex.emplace(std::move(faceKey), store->m_searchEntries.size());
-						store->m_searchEntries.push_back(BuildSearchableFontEntry(loadedDatabase, font));
+						faceToEntryIndex.emplace(std::move(faceKey), searchEntryBuilders.size());
+						searchEntryBuilders.push_back(BuildSearchableFontEntry(loadedDatabase, font));
 					}
 					else
 					{
-						AppendIndexPath(store->m_searchEntries[existing->second], loadedDatabase.m_indexPath);
-						AppendFontMetadata(store->m_searchEntries[existing->second], font);
+						AppendIndexPath(searchEntryBuilders[existing->second], loadedDatabase.m_indexPath);
+						AppendFontMetadata(searchEntryBuilders[existing->second], font);
 					}
 				}
 			}
+		}
+
+		store->m_searchEntries.reserve(searchEntryBuilders.size());
+		for (auto& builder : searchEntryBuilders)
+		{
+			store->m_searchEntries.push_back(std::move(builder.m_entry));
 		}
 		SortSearchEntries(store->m_searchEntries);
 		return store;

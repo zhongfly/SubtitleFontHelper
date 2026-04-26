@@ -596,12 +596,19 @@ namespace
 class sfh::QueryService::Implementation : public sfh::IRpcRequestHandler
 {
 private:
+	struct FontPriorityRange
+	{
+		uintptr_t m_begin = 0;
+		uintptr_t m_end = 0;
+		size_t m_priority = 0;
+	};
+
 	mutable std::mutex m_accessLock;
 
 	QueryTrie<FontDatabase::FontFaceElement, false> m_fullName;
 	QueryTrie<FontDatabase::FontFaceElement, false> m_postScriptName;
 	QueryTrie<FontDatabase::FontFaceElement, true> m_win32FamilyName;
-	std::unordered_map<const FontDatabase::FontFaceElement*, size_t> m_fontPriority;
+	std::vector<FontPriorityRange> m_fontPriorityRanges;
 	std::vector<std::unique_ptr<FontDatabase>> m_dbs;
 	std::vector<std::filesystem::path> m_loadedIndexPaths;
 	std::atomic<std::shared_ptr<const FontUiStore>> m_fontUiStore;
@@ -647,12 +654,13 @@ public:
 		QueryTrie<FontDatabase::FontFaceElement, true> win32FamilyName;
 		QueryTrie<FontDatabase::FontFaceElement, false> fullName;
 		QueryTrie<FontDatabase::FontFaceElement, false> postScriptName;
-		std::unordered_map<const FontDatabase::FontFaceElement*, size_t> fontPriority;
+		std::vector<FontPriorityRange> fontPriorityRanges;
 		auto fontUiStore = BuildFontUiStore(loadedDatabases);
 		std::vector<std::unique_ptr<FontDatabase>> dbs;
 		std::vector<std::filesystem::path> indexPaths;
 		dbs.reserve(loadedDatabases.size());
 		indexPaths.reserve(loadedDatabases.size());
+		fontPriorityRanges.reserve(loadedDatabases.size());
 		for (size_t priority = 0; priority < loadedDatabases.size(); ++priority)
 		{
 			auto db = std::move(loadedDatabases[priority].m_database);
@@ -660,9 +668,18 @@ public:
 			{
 				continue;
 			}
+			if (!db->m_fonts.empty())
+			{
+				const auto begin = reinterpret_cast<uintptr_t>(db->m_fonts.data());
+				const auto end = begin + db->m_fonts.size() * sizeof(FontDatabase::FontFaceElement);
+				fontPriorityRanges.push_back({
+					begin,
+					end,
+					priority
+				});
+			}
 			for (auto& font : db->m_fonts)
 			{
-				fontPriority.emplace(&font, priority);
 				for (auto& name : font.m_names)
 				{
 					if (name.m_type == name.Win32FamilyName)
@@ -698,7 +715,7 @@ public:
 		m_win32FamilyName = std::move(win32FamilyName);
 		m_fullName = std::move(fullName);
 		m_postScriptName = std::move(postScriptName);
-		m_fontPriority = std::move(fontPriority);
+		m_fontPriorityRanges = std::move(fontPriorityRanges);
 		m_fontUiSearchStore.reset();
 		m_fontUiStore.store(std::move(fontUiStore), std::memory_order_release);
 		if (publishVersion)
@@ -780,9 +797,15 @@ public:
 
 	size_t GetPriority(const FontDatabase::FontFaceElement* face) const
 	{
-		auto result = m_fontPriority.find(face);
-		THROW_HR_IF(E_UNEXPECTED, result == m_fontPriority.end());
-		return result->second;
+		const auto address = reinterpret_cast<uintptr_t>(face);
+		for (const auto& range : m_fontPriorityRanges)
+		{
+			if (range.m_begin <= address && address < range.m_end)
+			{
+				return range.m_priority;
+			}
+		}
+		THROW_HR(E_UNEXPECTED);
 	}
 
 	void RetainPriority(std::vector<FontDatabase::FontFaceElement*>& faces, size_t priority) const

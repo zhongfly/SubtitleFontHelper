@@ -4,7 +4,9 @@ on:
   push:
     branches: [ "master" ]
     paths:
+      - '.github/workflows/**'
       - 'SubtitleFontHelper.sln'
+      - 'copyFiles.ps1'
       - 'vcpkg.json'
       - 'packages/**'
       - 'FontDatabaseBuilder/**'
@@ -12,11 +14,15 @@ on:
       - 'Generated/**'
       - 'PersistantDataLib/**'
       - 'SharedIncludes/**'
+      - 'SubtitleFontHelperConfigWpf/**'
       - 'SubtitleFontAutoLoaderDaemon/**'
+      - 'tests/SubtitleFontHelperConfigWpf.Smoke/**'
   pull_request:
     branches: [ "master" ]
     paths:
+      - '.github/workflows/**'
       - 'SubtitleFontHelper.sln'
+      - 'copyFiles.ps1'
       - 'vcpkg.json'
       - 'packages/**'
       - 'FontDatabaseBuilder/**'
@@ -24,7 +30,9 @@ on:
       - 'Generated/**'
       - 'PersistantDataLib/**'
       - 'SharedIncludes/**'
+      - 'SubtitleFontHelperConfigWpf/**'
       - 'SubtitleFontAutoLoaderDaemon/**'
+      - 'tests/SubtitleFontHelperConfigWpf.Smoke/**'
 
 env:
   SOLUTION_FILE_PATH: .
@@ -130,6 +138,8 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       shell: pwsh
       run: |
+        dotnet build SubtitleFontHelperConfigWpf\SubtitleFontHelperConfigWpf.csproj -c $env:BUILD_CONFIGURATION
+        dotnet run --project tests\SubtitleFontHelperConfigWpf.Smoke\SubtitleFontHelperConfigWpf.Smoke.csproj -c $env:BUILD_CONFIGURATION
         .\copyFiles.ps1
 
     - name: Upload artifact

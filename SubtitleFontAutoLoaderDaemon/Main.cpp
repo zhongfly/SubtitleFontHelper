@@ -774,7 +774,7 @@ namespace sfh
 			std::unique_ptr<SystemTray> newSystemTray;
 			if (m_rpcServer == nullptr)
 			{
-				newRpcServer = std::make_unique<RpcServer>(this, this, this);
+				newRpcServer = std::make_unique<RpcServer>(this, this, this, this);
 			}
 			if (m_systemTray == nullptr)
 			{

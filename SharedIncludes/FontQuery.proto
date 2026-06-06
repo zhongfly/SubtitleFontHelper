@@ -17,8 +17,9 @@ message FontQueryRequest
 {
 	uint32 version = 1;
 	oneof request {
-	string queryString = 2;
-	FontLoadFeedback feedbackData = 3;
+		string queryString = 2;
+		FontLoadFeedback feedbackData = 3;
+		FontUiRequestMessage fontUiRequest = 4;
 	}
 }
 
@@ -26,6 +27,7 @@ message FontQueryResponse
 {
 	uint32 version = 1;
 	repeated FontFace fonts = 2;
+	FontUiSnapshotMessage fontUiSnapshot = 3;
 }
 
 message FontLoadFeedback
@@ -33,4 +35,40 @@ message FontLoadFeedback
 	repeated string path = 1;
 	string missingQuery = 2;
 	string processName = 3;
+}
+
+message FontUiRequestMessage
+{
+	string query = 1;
+	bool releaseSearchCache = 2;
+}
+
+message FontUiIndexSummaryMessage
+{
+	string indexPath = 1;
+	uint64 fontFileCount = 2;
+	uint64 fontNameCount = 3;
+	string fontNamesSummary = 4;
+}
+
+message FontUiSearchResultMessage
+{
+	string displayName = 1;
+	string familyNames = 2;
+	string fullNames = 3;
+	string postScriptNames = 4;
+	string indexPath = 5;
+	string fontPath = 6;
+	uint32 faceIndex = 7;
+}
+
+message FontUiSnapshotMessage
+{
+	bool isLoaded = 1;
+	bool hasStaleData = 2;
+	string statusMessage = 3;
+	repeated FontUiIndexSummaryMessage indexSummaries = 4;
+	repeated FontUiSearchResultMessage searchResults = 5;
+	uint64 totalSearchResultCount = 6;
+	bool isSearchResultTruncated = 7;
 }

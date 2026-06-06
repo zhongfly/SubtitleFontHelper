@@ -296,6 +296,9 @@ private:
 	// Fonts window
 	void ShowFontsWindow();
 	void ShowLogsWindow();
+	std::filesystem::path BuildStandaloneUiExecutablePath() const;
+	std::wstring BuildRpcPipeName() const;
+	void LaunchStandaloneUiWindow(ToolWindowKind kind);
 	void ShowToolWindow(HWND& handle, ToolWindowKind kind, const wchar_t* title, const wchar_t* text);
 	void DestroyToolWindow(HWND& handle);
 	static std::wstring BuildFontsIndexTooltip(const FontIndexSummary& summary);

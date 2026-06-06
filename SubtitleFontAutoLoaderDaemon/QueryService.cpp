@@ -262,6 +262,38 @@ namespace
 		return snapshot;
 	}
 
+	void PopulateFontUiSnapshotMessage(
+		sfh::FontUiSnapshotMessage& message,
+		const sfh::FontUiSnapshot& snapshot)
+	{
+		message.set_isloaded(snapshot.m_isLoaded);
+		message.set_hasstaledata(snapshot.m_hasStaleData);
+		message.set_statusmessage(sfh::WideToUtf8String(snapshot.m_statusMessage));
+		message.set_totalsearchresultcount(snapshot.m_totalSearchResultCount);
+		message.set_issearchresulttruncated(snapshot.m_isSearchResultTruncated);
+
+		for (const auto& summary : snapshot.m_indexSummaries)
+		{
+			auto* target = message.add_indexsummaries();
+			target->set_indexpath(sfh::WideToUtf8String(summary.m_indexPath));
+			target->set_fontfilecount(summary.m_fontFileCount);
+			target->set_fontnamecount(summary.m_fontNameCount);
+			target->set_fontnamessummary(sfh::WideToUtf8String(summary.m_fontNamesSummary));
+		}
+
+		for (const auto& result : snapshot.m_searchResults)
+		{
+			auto* target = message.add_searchresults();
+			target->set_displayname(sfh::WideToUtf8String(result.m_displayName));
+			target->set_familynames(sfh::WideToUtf8String(result.m_familyNames));
+			target->set_fullnames(sfh::WideToUtf8String(result.m_fullNames));
+			target->set_postscriptnames(sfh::WideToUtf8String(result.m_postScriptNames));
+			target->set_indexpath(sfh::WideToUtf8String(result.m_indexPath));
+			target->set_fontpath(sfh::WideToUtf8String(result.m_fontPath));
+			target->set_faceindex(result.m_faceIndex);
+		}
+	}
+
 	sfh::FontIndexSummary BuildFontIndexSummary(const sfh::LoadedFontDatabase& loadedDatabase)
 	{
 		sfh::FontIndexSummary summary;
@@ -928,15 +960,29 @@ public:
 
 	FontQueryResponse HandleRequest(const FontQueryRequest& request) override
 	{
-		std::lock_guard lg(m_accessLock);
 		FontQueryResponse ret;
+		ret.set_version(1);
+		if (request.has_fontuirequest())
+		{
+			const auto& fontUiRequest = request.fontuirequest();
+			if (fontUiRequest.releasesearchcache())
+			{
+				ReleaseFontUiSearchCache();
+			}
+
+			const auto snapshot = fontUiRequest.query().empty()
+				? CaptureFontUiSnapshot(std::wstring_view())
+				: CaptureFontUiSnapshot(Utf8ToWideString(request.fontuirequest().query()));
+			PopulateFontUiSnapshotMessage(*ret.mutable_fontuisnapshot(), snapshot);
+			return ret;
+		}
+
+		std::lock_guard lg(m_accessLock);
 		std::wstring queryString = Utf8ToWideString(request.querystring());
 		bool doTruncated = false;
 		if (queryString.size() == 31)
 			doTruncated = true;
 		std::vector<std::pair<std::wstring_view, uint32_t>> dedup;
-
-		ret.set_version(1);
 
 		auto family = m_win32FamilyName.QueryEntry(queryString.c_str(), doTruncated);
 		RetainDistinctFamilyFaces(family);

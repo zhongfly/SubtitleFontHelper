@@ -3,6 +3,7 @@
 #include "pch.h"
 #include "IDaemon.h"
 #include "QueryService.h"
+#include "TrayUiData.h"
 
 #include "FontQuery.pb.h"
 
@@ -26,7 +27,11 @@ namespace sfh
 		class Implementation;
 		std::unique_ptr<Implementation> m_impl;
 	public:
-		RpcServer(IDaemon* daemon, IRpcRequestHandler* handler, IRpcFeedbackHandler* feedbackHandler);
+		RpcServer(
+			IDaemon* daemon,
+			IRpcRequestHandler* handler,
+			IRpcFeedbackHandler* feedbackHandler,
+			ITrayUiDataProvider* trayUiDataProvider);
 		~RpcServer();
 
 		RpcServer(const RpcServer&) = delete;

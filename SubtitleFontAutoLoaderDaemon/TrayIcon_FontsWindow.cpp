@@ -1,13 +1,10 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
+#include "Common.h"
 
 void sfh::SystemTray::Implementation::ShowFontsWindow()
 {
-	ShowToolWindow(
-		m_fontsWindow,
-		ToolWindowKind::Fonts,
-		L"字体浏览",
-		L"");
+	LaunchStandaloneUiWindow(ToolWindowKind::Fonts);
 }
 
 void sfh::SystemTray::Implementation::ShowLogsWindow()
@@ -17,6 +14,58 @@ void sfh::SystemTray::Implementation::ShowLogsWindow()
 		ToolWindowKind::Logs,
 		L"日志查看",
 		L"");
+}
+
+std::filesystem::path sfh::SystemTray::Implementation::BuildStandaloneUiExecutablePath() const
+{
+	auto selfPath = wil::GetModuleFileNameW();
+	std::filesystem::path exePath = selfPath.get();
+	return exePath.parent_path() / L"SubtitleFontHelperUiWx.exe";
+}
+
+std::wstring sfh::SystemTray::Implementation::BuildRpcPipeName() const
+{
+	std::wstring pipeName = LR"_(\\.\pipe\SubtitleFontAutoLoaderRpc-)_";
+	pipeName += sfh::GetCurrentProcessUserSid();
+	return pipeName;
+}
+
+void sfh::SystemTray::Implementation::LaunchStandaloneUiWindow(ToolWindowKind kind)
+{
+	const auto executablePath = BuildStandaloneUiExecutablePath();
+	THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), !std::filesystem::exists(executablePath));
+
+	std::wostringstream commandLine;
+	commandLine << L'"' << executablePath.wstring() << L'"';
+	if (kind == ToolWindowKind::Fonts)
+	{
+		commandLine << L" --window fonts --rpc-pipe \"" << BuildRpcPipeName() << L'"';
+	}
+	else
+	{
+		commandLine << L" --window logs";
+	}
+
+	auto mutableCommandLine = commandLine.str();
+	mutableCommandLine.push_back(L'\0');
+
+	STARTUPINFOW startupInfo{};
+	startupInfo.cb = sizeof(startupInfo);
+	startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+	startupInfo.wShowWindow = SW_SHOWNORMAL;
+
+	wil::unique_process_information processInfo;
+	THROW_LAST_ERROR_IF(CreateProcessW(
+		executablePath.c_str(),
+		mutableCommandLine.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		CREATE_UNICODE_ENVIRONMENT,
+		nullptr,
+		executablePath.parent_path().c_str(),
+		&startupInfo,
+		processInfo.addressof()) == FALSE);
 }
 
 void sfh::SystemTray::Implementation::ShowToolWindow(HWND& handle, ToolWindowKind kind, const wchar_t* title, const wchar_t* text)

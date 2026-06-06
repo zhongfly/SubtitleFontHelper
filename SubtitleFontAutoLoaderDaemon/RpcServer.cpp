@@ -17,6 +17,7 @@ private:
 	IDaemon* m_daemon;
 	IRpcRequestHandler* m_requestHandler;
 	IRpcFeedbackHandler* m_feedbackHandler;
+	ITrayUiDataProvider* m_trayUiDataProvider;
 
 	std::thread m_listener;
 	std::atomic<size_t> m_checkPoint;
@@ -54,6 +55,7 @@ private:
 		IOBlock m_io;
 		RawMessageBlock m_msg;
 		std::list<ConnectionBlock>::iterator m_iterator;
+		bool m_usesFontUiSearchCache = false;
 	};
 
 	std::mutex m_connectionMutex;
@@ -121,8 +123,12 @@ private:
 			// handle feedback
 			return ProcessFeedback(connection, request);
 		}
-		else if (request.has_querystring())
+		else if (request.has_querystring() || request.has_fontuirequest())
 		{
+			if (request.has_fontuirequest())
+			{
+				connection.m_usesFontUiSearchCache = true;
+			}
 			// handle query
 			return ProcessRequest(connection, request);
 		}
@@ -318,6 +324,7 @@ private:
 			{
 				// destroy connection
 				std::lock_guard lg(m_connectionMutex);
+				CleanupConnection(connection);
 				m_connections.erase(connection.m_iterator);
 			}
 		}
@@ -348,11 +355,27 @@ private:
 		return BeginReadLengthPrefix(connection);
 	}
 
+	void CleanupConnection(ConnectionBlock& connection)
+	{
+		if (connection.m_usesFontUiSearchCache && m_trayUiDataProvider != nullptr)
+		{
+			m_trayUiDataProvider->ReleaseFontUiSearchCache();
+		}
+	}
+
 public:
 	static constexpr size_t WORKER_COUNT = 4;
 
-	Implementation(IDaemon* daemon, IRpcRequestHandler* requestHandler, IRpcFeedbackHandler* feedbackHandler)
-		: m_daemon(daemon), m_requestHandler(requestHandler), m_feedbackHandler(feedbackHandler), m_checkPoint(0)
+	Implementation(
+		IDaemon* daemon,
+		IRpcRequestHandler* requestHandler,
+		IRpcFeedbackHandler* feedbackHandler,
+		ITrayUiDataProvider* trayUiDataProvider)
+		: m_daemon(daemon),
+		  m_requestHandler(requestHandler),
+		  m_feedbackHandler(feedbackHandler),
+		  m_trayUiDataProvider(trayUiDataProvider),
+		  m_checkPoint(0)
 	{
 		m_exitEvent.create(wil::EventOptions::ManualReset);
 		m_startEvent.create(wil::EventOptions::ManualReset);
@@ -461,8 +484,16 @@ private:
 	}
 };
 
-sfh::RpcServer::RpcServer(IDaemon* daemon, IRpcRequestHandler* requestHandler, IRpcFeedbackHandler* feedbackHandler)
-	: m_impl(std::make_unique<Implementation>(daemon, requestHandler, feedbackHandler))
+sfh::RpcServer::RpcServer(
+	IDaemon* daemon,
+	IRpcRequestHandler* requestHandler,
+	IRpcFeedbackHandler* feedbackHandler,
+	ITrayUiDataProvider* trayUiDataProvider)
+	: m_impl(std::make_unique<Implementation>(
+		daemon,
+		requestHandler,
+		feedbackHandler,
+		trayUiDataProvider))
 {
 }
 

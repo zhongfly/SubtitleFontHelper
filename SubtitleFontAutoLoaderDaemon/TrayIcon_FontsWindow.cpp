@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
 #include "Common.h"
+#include "EventLog.h"
 
 void sfh::SystemTray::Implementation::ShowFontsWindow()
 {
@@ -9,11 +10,7 @@ void sfh::SystemTray::Implementation::ShowFontsWindow()
 
 void sfh::SystemTray::Implementation::ShowLogsWindow()
 {
-	ShowToolWindow(
-		m_logsWindow,
-		ToolWindowKind::Logs,
-		L"日志查看",
-		L"");
+	LaunchStandaloneUiWindow(ToolWindowKind::Logs);
 }
 
 std::filesystem::path sfh::SystemTray::Implementation::BuildStandaloneUiExecutablePath() const
@@ -43,7 +40,7 @@ void sfh::SystemTray::Implementation::LaunchStandaloneUiWindow(ToolWindowKind ki
 	}
 	else
 	{
-		commandLine << L" --window logs";
+		commandLine << L" --window logs --log-file \"" << EventLog::GetInstance().GetLogFilePath() << L'"';
 	}
 
 	auto mutableCommandLine = commandLine.str();

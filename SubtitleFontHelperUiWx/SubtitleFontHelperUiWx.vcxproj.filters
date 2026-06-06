@@ -29,9 +29,6 @@
     <ClCompile Include="LogsFrame.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MainFrame.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="SingleInstance.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -55,9 +52,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LogsFrame.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MainFrame.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SingleInstance.h">

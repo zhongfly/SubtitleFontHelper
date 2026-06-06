@@ -190,7 +190,6 @@
     <ClCompile Include="FontsFrame.cpp" />
     <ClCompile Include="LauncherConfig.cpp" />
     <ClCompile Include="LogsFrame.cpp" />
-    <ClCompile Include="MainFrame.cpp" />
     <ClCompile Include="SingleInstance.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -224,7 +223,6 @@
     <ClInclude Include="FontsFrame.h" />
     <ClInclude Include="LauncherConfig.h" />
     <ClInclude Include="LogsFrame.h" />
-    <ClInclude Include="MainFrame.h" />
     <ClInclude Include="SingleInstance.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

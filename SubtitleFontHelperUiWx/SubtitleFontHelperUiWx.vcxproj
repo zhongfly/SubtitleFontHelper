@@ -189,6 +189,7 @@
     <ClCompile Include="FontUiClient.cpp" />
     <ClCompile Include="FontsFrame.cpp" />
     <ClCompile Include="LauncherConfig.cpp" />
+    <ClCompile Include="LogsFrame.cpp" />
     <ClCompile Include="MainFrame.cpp" />
     <ClCompile Include="SingleInstance.cpp" />
   </ItemGroup>
@@ -222,6 +223,7 @@
     <ClInclude Include="FontUiClient.h" />
     <ClInclude Include="FontsFrame.h" />
     <ClInclude Include="LauncherConfig.h" />
+    <ClInclude Include="LogsFrame.h" />
     <ClInclude Include="MainFrame.h" />
     <ClInclude Include="SingleInstance.h" />
   </ItemGroup>

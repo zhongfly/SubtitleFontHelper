@@ -1,7 +1,7 @@
 #include "App.h"
 
 #include "FontsFrame.h"
-#include "MainFrame.h"
+#include "LogsFrame.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -55,7 +55,7 @@ bool sfh::ui::App::OnInit()
 		}
 		else
 		{
-			frame = new MainFrame(m_config);
+			frame = new LogsFrame(m_config);
 		}
 		frame->Show(true);
 		SetTopWindow(frame);

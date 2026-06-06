@@ -7,7 +7,8 @@
     "protobuf",
     "freetype",
     "wil",
-    "xxhash"
+    "xxhash",
+    "wxwidgets"
   ],
   "builtin-baseline": "1e199d32ad53aab1defda61ce41c380302e3f95c"
 }

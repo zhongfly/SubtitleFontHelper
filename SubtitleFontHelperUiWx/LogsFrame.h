@@ -26,6 +26,10 @@ namespace sfh::ui
 		static constexpr int REFRESH_TIMER_ID = wxID_HIGHEST + 201;
 
 		void BuildLayout();
+		void ApplyWindowMetrics();
+		void UpdateWrappedLabels();
+		void SetStatusLabelText(const wxString& text);
+		void ApplyLogTextFormatting();
 		void RefreshLogsContent(bool forceReload);
 		void UpdateLogsText(const std::wstring& statusText, const std::wstring& contentText, bool scrollToBottom);
 		void ScrollLogsToBottom();
@@ -44,6 +48,8 @@ namespace sfh::ui
 		void OnRefreshTimer(wxTimerEvent& event);
 		void OnAutoScrollChanged(wxCommandEvent& event);
 		void OnScrollBottom(wxCommandEvent& event);
+		void OnSize(wxSizeEvent& event);
+		void OnDpiChanged(wxDPIChangedEvent& event);
 		void OnCloseWindow(wxCloseEvent& event);
 
 	private:
@@ -58,6 +64,9 @@ namespace sfh::ui
 		wxTextCtrl* m_logText = nullptr;
 		wxTimer m_refreshTimer;
 		bool m_autoScrollEnabled = true;
+		bool m_hasAppliedInitialWindowSize = false;
+		wxString m_subtitleLabelTextValue;
+		wxString m_statusLabelTextValue;
 		std::wstring m_lastLoadedText;
 		std::uint64_t m_lastFileSize = 0;
 		std::uint64_t m_lastWriteTime = 0;

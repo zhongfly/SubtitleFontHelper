@@ -74,6 +74,10 @@ jobs:
         $tripletInstallRoot="$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
         & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet ${{ matrix.triplet }} --x-install-root="$tripletInstallRoot"
 
+    - name: Restore .NET projects
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: dotnet restore SubtitleFontHelperConfigWpf\SubtitleFontHelperConfigWpf.csproj
+
     - name: Build ${{ matrix.platform }}
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} /p:VcpkgManifestInstall=false ${{env.SOLUTION_FILE_PATH}}

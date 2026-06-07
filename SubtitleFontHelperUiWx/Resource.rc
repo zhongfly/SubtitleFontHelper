@@ -1,0 +1,10 @@
+#include "winres.h"
+#include "../SharedIncludes/VersionInfo.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+#define SFH_FILE_DESCRIPTION "Subtitle Font Helper wxWidgets UI"
+#define SFH_INTERNAL_NAME "SubtitleFontHelperUiWx.exe"
+#define SFH_ORIGINAL_FILENAME "SubtitleFontHelperUiWx.exe"
+#define SFH_FILE_TYPE VFT_APP
+#include "../SharedIncludes/VersionInfo.rc2"

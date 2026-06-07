@@ -2,11 +2,12 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#include <Richedit.h>
 
 #include <algorithm>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <wx/font.h>
 #include <wx/settings.h>
@@ -16,6 +17,18 @@ namespace
 {
 	constexpr std::size_t LOG_VIEW_MAX_BYTES = 1024 * 1024;
 	constexpr std::size_t LOG_VIEW_MAX_LINES = 5000;
+
+	enum LogTextStyle
+	{
+		LOG_STYLE_DEFAULT = 0,
+		LOG_STYLE_TIMESTAMP,
+		LOG_STYLE_SOURCE,
+		LOG_STYLE_THREAD,
+		LOG_STYLE_INFO,
+		LOG_STYLE_WARN,
+		LOG_STYLE_ERROR,
+		LOG_STYLE_DEBUG,
+	};
 
 	struct StructuredLogLineSegments
 	{
@@ -44,16 +57,97 @@ namespace
 
 	struct LogsViewportState
 	{
-		DWORD m_selectionStart = 0;
-		DWORD m_selectionEnd = 0;
-		LONG m_firstVisibleLine = 0;
-		POINT m_scrollPosition{};
-		bool m_hasScrollPosition = false;
+		int m_selectionStart = 0;
+		int m_selectionEnd = 0;
+		int m_firstVisibleDisplayLine = 0;
 	};
+
+	constexpr wchar_t BYTE_ORDER_MARK = static_cast<wchar_t>(0xFEFF);
 
 	wxString ToWxString(std::wstring_view value)
 	{
 		return wxString(value.data(), value.size());
+	}
+
+	std::string WideToUtf8BestEffort(std::wstring_view text)
+	{
+		if (text.empty())
+		{
+			return {};
+		}
+
+		int length = WideCharToMultiByte(
+			CP_UTF8,
+			0,
+			text.data(),
+			static_cast<int>(text.size()),
+			nullptr,
+			0,
+			nullptr,
+			nullptr);
+		if (length <= 0)
+		{
+			return {};
+		}
+
+		std::string result(static_cast<size_t>(length), '\0');
+		length = WideCharToMultiByte(
+			CP_UTF8,
+			0,
+			text.data(),
+			static_cast<int>(text.size()),
+			result.data(),
+			static_cast<int>(result.size()),
+			nullptr,
+			nullptr);
+		if (length <= 0)
+		{
+			return {};
+		}
+
+		result.resize(static_cast<size_t>(length));
+		return result;
+	}
+
+	std::vector<int> BuildUtf8OffsetMap(std::wstring_view text)
+	{
+		std::vector<int> offsets(text.size() + 1, 0);
+		int byteOffset = 0;
+		size_t index = 0;
+		while (index < text.size())
+		{
+			offsets[index] = byteOffset;
+
+			size_t charCount = 1;
+			if (index + 1 < text.size()
+				&& text[index] >= 0xD800
+				&& text[index] <= 0xDBFF
+				&& text[index + 1] >= 0xDC00
+				&& text[index + 1] <= 0xDFFF)
+			{
+				charCount = 2;
+			}
+
+			const int byteCount = WideCharToMultiByte(
+				CP_UTF8,
+				0,
+				text.data() + index,
+				static_cast<int>(charCount),
+				nullptr,
+				0,
+				nullptr,
+				nullptr);
+			if (byteCount > 0)
+			{
+				byteOffset += byteCount;
+			}
+
+			index += charCount;
+			offsets[index] = byteOffset;
+		}
+
+		offsets[text.size()] = byteOffset;
+		return offsets;
 	}
 
 	bool TryParseStructuredLogLine(std::wstring_view line, StructuredLogLineSegments& segments)
@@ -127,51 +221,29 @@ namespace
 		if (wxSystemSettings::GetAppearance().IsDark())
 		{
 			return {
-				wxColour(38, 38, 38),
-				wxColour(146, 140, 132),
-				wxColour(220, 185, 126),
-				wxColour(134, 140, 150),
-				wxColour(232, 228, 220),
-				wxColour(132, 192, 132),
-				wxColour(224, 188, 92),
-				wxColour(236, 116, 102),
-				wxColour(120, 172, 230),
+				wxColour(24, 26, 30),
+				wxColour(160, 168, 176),
+				wxColour(255, 198, 109),
+				wxColour(124, 214, 196),
+				wxColour(244, 246, 248),
+				wxColour(120, 224, 142),
+				wxColour(255, 195, 82),
+				wxColour(255, 112, 102),
+				wxColour(111, 186, 255),
 			};
 		}
 
 		return {
-			wxColour(248, 245, 239),
-			wxColour(112, 103, 92),
-			wxColour(111, 78, 36),
-			wxColour(128, 120, 108),
-			wxColour(26, 26, 26),
-			wxColour(35, 98, 62),
-			wxColour(160, 110, 30),
-			wxColour(170, 58, 40),
-			wxColour(52, 92, 138),
+			wxColour(252, 252, 250),
+			wxColour(91, 96, 105),
+			wxColour(111, 67, 178),
+			wxColour(0, 117, 117),
+			wxColour(16, 18, 22),
+			wxColour(0, 118, 61),
+			wxColour(170, 91, 0),
+			wxColour(196, 39, 39),
+			wxColour(34, 100, 184),
 		};
-	}
-
-	const wxColour& GetLogLevelColour(const LogsTextPalette& palette, std::wstring_view level)
-	{
-		if (level == L"INFO")
-		{
-			return palette.m_infoText;
-		}
-		if (level == L"WARN")
-		{
-			return palette.m_warnText;
-		}
-		if (level == L"ERROR")
-		{
-			return palette.m_errorText;
-		}
-		if (level == L"DEBUG")
-		{
-			return palette.m_debugText;
-		}
-
-		return palette.m_messageText;
 	}
 
 	std::uint64_t FileTimeToUInt64(const FILETIME& value)
@@ -193,40 +265,58 @@ namespace
 		return result;
 	}
 
-	LogsViewportState CaptureLogsViewportState(HWND editHandle)
+	LogsViewportState CaptureLogsViewportState(wxStyledTextCtrl* logText)
 	{
 		LogsViewportState state{};
-		SendMessageW(
-			editHandle,
-			EM_GETSEL,
-		reinterpret_cast<WPARAM>(&state.m_selectionStart),
-		reinterpret_cast<LPARAM>(&state.m_selectionEnd));
-	state.m_firstVisibleLine = static_cast<LONG>(SendMessageW(editHandle, EM_GETFIRSTVISIBLELINE, 0, 0));
-	POINT scrollPosition{};
-	if (SendMessageW(editHandle, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scrollPosition)) != 0)
-	{
-		state.m_scrollPosition = scrollPosition;
-		state.m_hasScrollPosition = true;
-	}
-	return state;
-}
-
-	void RestoreLogsViewportState(HWND editHandle, const LogsViewportState& state)
-	{
-	const DWORD textLength = static_cast<DWORD>(GetWindowTextLengthW(editHandle));
-	const DWORD selectionStart = (std::min)(state.m_selectionStart, textLength);
-	const DWORD selectionEnd = (std::min)(state.m_selectionEnd, textLength);
-	SendMessageW(editHandle, EM_SETSEL, selectionStart, selectionEnd);
-	if (state.m_hasScrollPosition)
-	{
-		POINT scrollPosition = state.m_scrollPosition;
-		SendMessageW(editHandle, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scrollPosition));
-		return;
+		state.m_selectionStart = logText->GetSelectionStart();
+		state.m_selectionEnd = logText->GetSelectionEnd();
+		state.m_firstVisibleDisplayLine = logText->GetFirstVisibleLine();
+		return state;
 	}
 
-	const LONG currentFirstVisibleLine = static_cast<LONG>(SendMessageW(editHandle, EM_GETFIRSTVISIBLELINE, 0, 0));
-	SendMessageW(editHandle, EM_LINESCROLL, 0, state.m_firstVisibleLine - currentFirstVisibleLine);
-}
+	void RestoreLogsViewportState(wxStyledTextCtrl* logText, const LogsViewportState& state)
+	{
+		const int textLength = logText->GetTextLength();
+		const int selectionStart = (std::min)(state.m_selectionStart, textLength);
+		const int selectionEnd = (std::min)(state.m_selectionEnd, textLength);
+		const int lineCount = logText->GetLineCount();
+		int maxFirstVisibleDisplayLine = 0;
+		if (lineCount > 0)
+		{
+			const int lastDocumentLine = lineCount - 1;
+			maxFirstVisibleDisplayLine = logText->VisibleFromDocLine(lastDocumentLine)
+				+ (std::max)(1, logText->WrapCount(lastDocumentLine))
+				- 1;
+		}
+		const int firstVisibleDisplayLine = std::clamp(
+			state.m_firstVisibleDisplayLine,
+			0,
+			maxFirstVisibleDisplayLine);
+		logText->SetSelection(selectionStart, selectionEnd);
+		logText->SetFirstVisibleLine(firstVisibleDisplayLine);
+	}
+
+	bool IsWindowOrDescendant(HWND ancestor, HWND candidate)
+	{
+		return candidate != nullptr
+			&& (candidate == ancestor || IsChild(ancestor, candidate) != FALSE);
+	}
+
+	bool IsPointInsideWindow(HWND hWnd, POINT screenPoint)
+	{
+		if (hWnd == nullptr)
+		{
+			return false;
+		}
+
+		RECT windowRect{};
+		if (GetWindowRect(hWnd, &windowRect) == FALSE)
+		{
+			return false;
+		}
+		return PtInRect(&windowRect, screenPoint) != FALSE;
+	}
+
 }
 
 sfh::ui::LogsFrame::LogsFrame(const LauncherConfig& config)
@@ -278,17 +368,31 @@ void sfh::ui::LogsFrame::BuildLayout()
 	m_autoScrollCheck = new wxCheckBox(m_panel, wxID_ANY, L"自动滚动");
 	m_autoScrollCheck->SetValue(true);
 	m_scrollBottomButton = new wxButton(m_panel, wxID_ANY, L"滚动到底部");
-	m_logText = new wxTextCtrl(
+	m_logText = new wxStyledTextCtrl(
 		m_panel,
 		wxID_ANY,
-		wxEmptyString,
 		wxDefaultPosition,
 		wxDefaultSize,
-		wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP | wxHSCROLL | wxTE_RICH2);
+		wxBORDER_SIMPLE);
 
 	wxFont logFont = m_logText->GetFont();
 	logFont.SetFamily(wxFONTFAMILY_TELETYPE);
+	logFont.SetFaceName(L"Consolas");
 	m_logText->SetFont(logFont);
+	m_logText->SetTechnology(wxSTC_TECHNOLOGY_DIRECTWRITE);
+	m_logText->SetFontQuality(wxSTC_EFF_QUALITY_LCD_OPTIMIZED);
+	m_logText->SetCodePage(wxSTC_CP_UTF8);
+	m_logText->SetWrapMode(wxSTC_WRAP_WORD);
+	m_logText->SetWrapIndentMode(wxSTC_WRAPINDENT_SAME);
+	m_logText->SetUseHorizontalScrollBar(false);
+	m_logText->SetScrollWidthTracking(true);
+	m_logText->SetMarginType(0, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginType(1, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginType(2, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginWidth(0, 0);
+	m_logText->SetMarginWidth(1, 0);
+	m_logText->SetMarginWidth(2, 0);
+	m_logText->SetReadOnly(true);
 
 	m_autoScrollCheck->Bind(wxEVT_CHECKBOX, &LogsFrame::OnAutoScrollChanged, this);
 	m_scrollBottomButton->Bind(wxEVT_BUTTON, &LogsFrame::OnScrollBottom, this);
@@ -337,6 +441,11 @@ void sfh::ui::LogsFrame::ApplyWindowMetrics()
 			logFont = baseFont;
 			logFont.SetFamily(wxFONTFAMILY_TELETYPE);
 		}
+		logFont.SetFaceName(L"Consolas");
+		if (logFont.GetPointSize() > 0)
+		{
+			logFont.SetPointSize((std::max)(11, logFont.GetPointSize() + 2));
+		}
 
 		m_panel->SetFont(baseFont);
 		m_titleText->SetFont(titleFont);
@@ -352,18 +461,51 @@ void sfh::ui::LogsFrame::ApplyWindowMetrics()
 	m_logText->SetBackgroundColour(palette.m_background);
 	m_logText->SetForegroundColour(palette.m_messageText);
 
-	wxTextAttr defaultStyle;
-	defaultStyle.SetFont(m_logText->GetFont());
-	defaultStyle.SetTextColour(palette.m_messageText);
-	defaultStyle.SetBackgroundColour(palette.m_background);
-	defaultStyle.SetFontWeight(wxFONTWEIGHT_NORMAL);
-	m_logText->SetDefaultStyle(defaultStyle);
-
-	if (const auto editHandle = reinterpret_cast<HWND>(m_logText->GetHandle()); editHandle != nullptr)
-	{
-		const int textMargin = FromDIP(10);
-		SendMessageW(editHandle, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(textMargin, textMargin));
-	}
+	m_logText->StyleSetFont(wxSTC_STYLE_DEFAULT, m_logText->GetFont());
+	m_logText->StyleSetForeground(wxSTC_STYLE_DEFAULT, palette.m_messageText);
+	m_logText->StyleSetBackground(wxSTC_STYLE_DEFAULT, palette.m_background);
+	m_logText->StyleClearAll();
+	m_logText->StyleSetForeground(LOG_STYLE_DEFAULT, palette.m_messageText);
+	m_logText->StyleSetBackground(LOG_STYLE_DEFAULT, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_DEFAULT, m_logText->GetFont());
+	m_logText->StyleSetForeground(LOG_STYLE_TIMESTAMP, palette.m_timestampText);
+	m_logText->StyleSetBackground(LOG_STYLE_TIMESTAMP, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_TIMESTAMP, m_logText->GetFont());
+	m_logText->StyleSetForeground(LOG_STYLE_SOURCE, palette.m_sourceText);
+	m_logText->StyleSetBackground(LOG_STYLE_SOURCE, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_SOURCE, m_logText->GetFont());
+	m_logText->StyleSetBold(LOG_STYLE_SOURCE, true);
+	m_logText->StyleSetForeground(LOG_STYLE_THREAD, palette.m_threadText);
+	m_logText->StyleSetBackground(LOG_STYLE_THREAD, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_THREAD, m_logText->GetFont());
+	m_logText->StyleSetForeground(LOG_STYLE_INFO, palette.m_infoText);
+	m_logText->StyleSetBackground(LOG_STYLE_INFO, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_INFO, m_logText->GetFont());
+	m_logText->StyleSetBold(LOG_STYLE_INFO, true);
+	m_logText->StyleSetForeground(LOG_STYLE_WARN, palette.m_warnText);
+	m_logText->StyleSetBackground(LOG_STYLE_WARN, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_WARN, m_logText->GetFont());
+	m_logText->StyleSetBold(LOG_STYLE_WARN, true);
+	m_logText->StyleSetForeground(LOG_STYLE_ERROR, palette.m_errorText);
+	m_logText->StyleSetBackground(LOG_STYLE_ERROR, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_ERROR, m_logText->GetFont());
+	m_logText->StyleSetBold(LOG_STYLE_ERROR, true);
+	m_logText->StyleSetForeground(LOG_STYLE_DEBUG, palette.m_debugText);
+	m_logText->StyleSetBackground(LOG_STYLE_DEBUG, palette.m_background);
+	m_logText->StyleSetFont(LOG_STYLE_DEBUG, m_logText->GetFont());
+	m_logText->StyleSetBold(LOG_STYLE_DEBUG, true);
+	m_logText->SetTechnology(wxSTC_TECHNOLOGY_DIRECTWRITE);
+	m_logText->SetFontQuality(wxSTC_EFF_QUALITY_LCD_OPTIMIZED);
+	m_logText->SetCaretStyle(wxSTC_CARETSTYLE_INVISIBLE);
+	m_logText->SetSelBackground(true, wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT));
+	m_logText->SetSelForeground(true, wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHTTEXT));
+	m_logText->SetMargins(FromDIP(10), FromDIP(10));
+	m_logText->SetMarginType(0, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginType(1, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginType(2, wxSTC_MARGIN_SYMBOL);
+	m_logText->SetMarginWidth(0, 0);
+	m_logText->SetMarginWidth(1, 0);
+	m_logText->SetMarginWidth(2, 0);
 
 	if (!m_hasAppliedInitialWindowSize)
 	{
@@ -394,7 +536,7 @@ void sfh::ui::LogsFrame::ApplyWindowMetrics()
 
 	UpdateWrappedLabels();
 	Layout();
-	ApplyLogTextFormatting();
+	ApplyLogTextFormatting(m_lastLoadedText);
 }
 
 void sfh::ui::LogsFrame::UpdateWrappedLabels()
@@ -420,39 +562,57 @@ void sfh::ui::LogsFrame::SetStatusLabelText(const wxString& text)
 	}
 }
 
-void sfh::ui::LogsFrame::ApplyLogTextFormatting()
+bool sfh::ui::LogsFrame::IsLogViewMouseInteractionActive() const
+{
+	if (m_logText == nullptr || (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+	{
+		return false;
+	}
+
+	const auto logHandle = reinterpret_cast<HWND>(m_logText->GetHandle());
+	const auto frameHandle = reinterpret_cast<HWND>(GetHandle());
+	const HWND captureHandle = ::GetCapture();
+	if (IsWindowOrDescendant(logHandle, captureHandle) || IsWindowOrDescendant(frameHandle, captureHandle))
+	{
+		return true;
+	}
+
+	POINT cursorPos{};
+	return GetCursorPos(&cursorPos) != FALSE && IsPointInsideWindow(frameHandle, cursorPos);
+}
+
+void sfh::ui::LogsFrame::ApplyLogTextFormatting(std::wstring_view controlText)
 {
 	if (m_logText == nullptr)
 	{
 		return;
 	}
 
-	const auto palette = GetLogTextPalette();
-	const long textLength = m_logText->GetLastPosition();
+	const int textLength = m_logText->GetTextLength();
 	if (textLength > 0)
 	{
-		wxTextAttr baseStyle;
-		baseStyle.SetFont(m_logText->GetFont());
-		baseStyle.SetTextColour(palette.m_messageText);
-		baseStyle.SetBackgroundColour(palette.m_background);
-		baseStyle.SetFontWeight(wxFONTWEIGHT_NORMAL);
-		m_logText->SetStyle(0, textLength, baseStyle);
+		m_logText->StartStyling(0);
+		m_logText->SetStyling(textLength, LOG_STYLE_DEFAULT);
 	}
 
-	const std::wstring controlText = m_logText->GetValue().ToStdWstring();
-	auto applyRange = [this, &palette](size_t start, size_t length, const wxColour& color, wxFontWeight weight = wxFONTWEIGHT_NORMAL)
+	const auto utf8Offsets = BuildUtf8OffsetMap(controlText);
+	auto applyRange = [this, &utf8Offsets](size_t start, size_t length, int style)
 	{
-		if (length == 0)
+		if (length == 0 || start >= utf8Offsets.size())
 		{
 			return;
 		}
 
-		wxTextAttr style;
-		style.SetFont(m_logText->GetFont());
-		style.SetTextColour(color);
-		style.SetBackgroundColour(palette.m_background);
-		style.SetFontWeight(weight);
-		m_logText->SetStyle(static_cast<long>(start), static_cast<long>(start + length), style);
+		const size_t end = (std::min)(start + length, utf8Offsets.size() - 1);
+		const int byteStart = utf8Offsets[start];
+		const int byteEnd = utf8Offsets[end];
+		if (byteEnd <= byteStart)
+		{
+			return;
+		}
+
+		m_logText->StartStyling(byteStart);
+		m_logText->SetStyling(byteEnd - byteStart, style);
 	};
 
 	size_t lineStart = 0;
@@ -476,28 +636,40 @@ void sfh::ui::LogsFrame::ApplyLogTextFormatting()
 			StructuredLogLineSegments segments{};
 			if (TryParseStructuredLogLine(line, segments))
 			{
-				applyRange(lineStart, 23, palette.m_timestampText);
+				applyRange(lineStart, 23, LOG_STYLE_TIMESTAMP);
 
 				const size_t levelNameStart = segments.m_levelStart + 1;
 				const size_t levelNameLength = segments.m_levelLength >= 2 ? segments.m_levelLength - 2 : 0;
+				int levelStyle = LOG_STYLE_DEFAULT;
+				const auto levelName = line.substr(levelNameStart, levelNameLength);
+				if (levelName == L"INFO")
+				{
+					levelStyle = LOG_STYLE_INFO;
+				}
+				else if (levelName == L"WARN")
+				{
+					levelStyle = LOG_STYLE_WARN;
+				}
+				else if (levelName == L"ERROR")
+				{
+					levelStyle = LOG_STYLE_ERROR;
+				}
+				else if (levelName == L"DEBUG")
+				{
+					levelStyle = LOG_STYLE_DEBUG;
+				}
 				applyRange(
 					lineStart + segments.m_levelStart,
 					segments.m_levelLength,
-					GetLogLevelColour(palette, line.substr(levelNameStart, levelNameLength)),
-					wxFONTWEIGHT_BOLD);
+					levelStyle);
 				applyRange(
 					lineStart + segments.m_sourceStart,
 					segments.m_sourceLength,
-					palette.m_sourceText,
-					wxFONTWEIGHT_BOLD);
+					LOG_STYLE_SOURCE);
 				applyRange(
 					lineStart + segments.m_threadStart,
 					segments.m_threadLength,
-					palette.m_threadText);
-				applyRange(
-					lineStart + segments.m_messageStart,
-					segments.m_messageLength,
-					palette.m_messageText);
+					LOG_STYLE_THREAD);
 			}
 		}
 
@@ -512,6 +684,11 @@ void sfh::ui::LogsFrame::ApplyLogTextFormatting()
 
 void sfh::ui::LogsFrame::RefreshLogsContent(bool forceReload)
 {
+	if (!forceReload && IsLogViewMouseInteractionActive())
+	{
+		return;
+	}
+
 	if (m_config.m_logFilePath.empty())
 	{
 		const std::wstring statusText = L"未提供日志文件路径。";
@@ -608,24 +785,21 @@ void sfh::ui::LogsFrame::UpdateLogsText(const std::wstring& statusText, const st
 	UpdateWrappedLabels();
 	Layout();
 
-	HWND editHandle = reinterpret_cast<HWND>(m_logText->GetHandle());
-	if (editHandle == nullptr)
-	{
-		m_logText->ChangeValue(ToWxString(contentText));
-		if (scrollToBottom)
-		{
-			ScrollLogsToBottom();
-		}
-		return;
-	}
-
 	const auto viewportState = scrollToBottom
 		? LogsViewportState{}
-		: CaptureLogsViewportState(editHandle);
+		: CaptureLogsViewportState(m_logText);
+	const std::string utf8Text = WideToUtf8BestEffort(contentText);
 
 	m_logText->Freeze();
-	m_logText->ChangeValue(ToWxString(contentText));
-	ApplyLogTextFormatting();
+	m_logText->SetReadOnly(false);
+	m_logText->ClearAll();
+	if (!utf8Text.empty())
+	{
+		m_logText->AppendTextRaw(utf8Text.data(), static_cast<int>(utf8Text.size()));
+	}
+	ApplyLogTextFormatting(contentText);
+	m_logText->EmptyUndoBuffer();
+	m_logText->SetReadOnly(true);
 	m_logText->Thaw();
 
 	if (scrollToBottom)
@@ -634,14 +808,14 @@ void sfh::ui::LogsFrame::UpdateLogsText(const std::wstring& statusText, const st
 	}
 	else
 	{
-		RestoreLogsViewportState(editHandle, viewportState);
+		RestoreLogsViewportState(m_logText, viewportState);
 	}
 }
 
 void sfh::ui::LogsFrame::ScrollLogsToBottom()
 {
-	m_logText->SetInsertionPointEnd();
-	m_logText->ShowPosition(m_logText->GetLastPosition());
+	m_logText->ScrollToEnd();
+	m_logText->SetEmptySelection(m_logText->GetTextLength());
 }
 
 void sfh::ui::LogsFrame::UpdateAutoScrollState()
@@ -777,6 +951,10 @@ std::wstring sfh::ui::LogsFrame::FormatLogsContentForViewer(std::wstring text)
 	}
 
 	text.erase(std::remove(text.begin(), text.end(), L'\r'), text.end());
+	while (!text.empty() && text.back() == L'\n')
+	{
+		text.pop_back();
+	}
 
 	std::wstring formatted;
 	formatted.reserve(text.size() + text.size() / 8);
@@ -976,6 +1154,10 @@ bool sfh::ui::LogsFrame::TryReadLogTail(std::wstring& text, bool& truncated, std
 	{
 		errorMessage = L"解析日志文本失败。";
 		return false;
+	}
+	if (!text.empty() && text.front() == BYTE_ORDER_MARK)
+	{
+		text.erase(text.begin());
 	}
 
 	bool truncatedByLines = false;

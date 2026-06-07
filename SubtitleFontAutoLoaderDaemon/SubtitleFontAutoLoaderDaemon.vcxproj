@@ -217,9 +217,7 @@
     <ClCompile Include="ToastNotifier.cpp" />
     <ClCompile Include="TrayIcon_Core.cpp" />
     <ClCompile Include="TrayIcon_Theme.cpp" />
-    <ClCompile Include="TrayIcon_FontsWindow.cpp" />
-    <ClCompile Include="TrayIcon_LogsWindow.cpp" />
-    <ClCompile Include="TrayIcon_ToolWindowProc.cpp" />
+    <ClCompile Include="TrayIcon_StandaloneUi.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\SharedIncludes\FontQuery.proto">

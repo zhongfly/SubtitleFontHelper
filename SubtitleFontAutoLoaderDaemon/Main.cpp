@@ -554,14 +554,6 @@ namespace sfh
 			return dbs;
 		}
 
-		void NotifyFontUiDataChanged()
-		{
-			if (m_systemTray != nullptr)
-			{
-				m_systemTray->NotifyFontUiDataChanged();
-			}
-		}
-
 		void UpdateManagedIndexBuildTrayState()
 		{
 			if (m_systemTray == nullptr)
@@ -610,7 +602,6 @@ namespace sfh
 
 			auto dbs = LoadAvailableIndexDatabases(*m_service);
 			m_service->m_queryService->Load(std::move(dbs));
-			NotifyFontUiDataChanged();
 		}
 
 		void OnReload(const std::vector<std::wstring>& cmdline)
@@ -778,7 +769,7 @@ namespace sfh
 			}
 			if (m_systemTray == nullptr)
 			{
-				newSystemTray = std::make_unique<SystemTray>(this, this);
+				newSystemTray = std::make_unique<SystemTray>(this);
 			}
 			{
 				std::lock_guard lg(m_serviceAccessLock);
@@ -807,7 +798,6 @@ namespace sfh
 			}
 			UpdateManagedIndexBuildTrayState();
 			m_systemTray->NotifyFinishLoad();
-			m_systemTray->NotifyFontUiDataChanged();
 			oldService.reset();
 		}
 

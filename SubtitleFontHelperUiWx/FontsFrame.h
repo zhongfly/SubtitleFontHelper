@@ -91,6 +91,7 @@ namespace sfh::ui
 		uint64_t m_lastAppliedRequestId = 0;
 		bool m_hasPendingRefresh = false;
 		bool m_workerStop = false;
+		std::vector<FontUiIndexSummaryData> m_currentIndexSummaries;
 		std::vector<FontUiSearchResultData> m_currentResults;
 		bool m_isClosing = false;
 		bool m_hasAppliedInitialWindowSize = false;

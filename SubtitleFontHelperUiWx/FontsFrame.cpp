@@ -18,6 +18,55 @@ namespace
 	{
 		return wxString(text.data(), text.size());
 	}
+
+	bool AreIndexSummariesEqual(
+		const std::vector<sfh::ui::FontUiIndexSummaryData>& left,
+		const std::vector<sfh::ui::FontUiIndexSummaryData>& right)
+	{
+		if (left.size() != right.size())
+		{
+			return false;
+		}
+
+		for (size_t i = 0; i < left.size(); ++i)
+		{
+			if (left[i].m_indexPath != right[i].m_indexPath
+				|| left[i].m_fontFileCount != right[i].m_fontFileCount
+				|| left[i].m_fontNameCount != right[i].m_fontNameCount
+				|| left[i].m_fontNamesSummary != right[i].m_fontNamesSummary)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool AreSearchResultsEqual(
+		const std::vector<sfh::ui::FontUiSearchResultData>& left,
+		const std::vector<sfh::ui::FontUiSearchResultData>& right)
+	{
+		if (left.size() != right.size())
+		{
+			return false;
+		}
+
+		for (size_t i = 0; i < left.size(); ++i)
+		{
+			if (left[i].m_displayName != right[i].m_displayName
+				|| left[i].m_familyNames != right[i].m_familyNames
+				|| left[i].m_fullNames != right[i].m_fullNames
+				|| left[i].m_postScriptNames != right[i].m_postScriptNames
+				|| left[i].m_indexPath != right[i].m_indexPath
+				|| left[i].m_fontPath != right[i].m_fontPath
+				|| left[i].m_faceIndex != right[i].m_faceIndex)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 sfh::ui::FontsFrame::FontsFrame(const LauncherConfig& config)
@@ -377,11 +426,16 @@ void sfh::ui::FontsFrame::ApplyWorkerResults()
 void sfh::ui::FontsFrame::ApplySnapshot(const FontUiSnapshotData& snapshot, std::wstring_view query)
 {
 	SetStatusLabelText(ToWxString(snapshot.m_statusMessage));
-	PopulateIndexList(snapshot);
-	PopulateResultList(snapshot);
+	if (!AreIndexSummariesEqual(m_currentIndexSummaries, snapshot.m_indexSummaries))
+	{
+		PopulateIndexList(snapshot);
+	}
+	if (!AreSearchResultsEqual(m_currentResults, snapshot.m_searchResults))
+	{
+		PopulateResultList(snapshot);
+	}
 	UpdateSearchSummary(snapshot, query);
 	UpdateWrappedLabels();
-	UpdateListColumnWidths();
 	Layout();
 }
 
@@ -389,16 +443,17 @@ void sfh::ui::FontsFrame::ApplyRefreshFailure(std::wstring_view message)
 {
 	SetStatusLabelText(ToWxString(message));
 	SetSearchSummaryLabelText(L"当前无法获取字体数据。");
+	m_currentIndexSummaries.clear();
 	m_currentResults.clear();
 	m_indexList->DeleteAllItems();
 	m_resultList->DeleteAllItems();
 	UpdateWrappedLabels();
-	UpdateListColumnWidths();
 	Layout();
 }
 
 void sfh::ui::FontsFrame::PopulateIndexList(const FontUiSnapshotData& snapshot)
 {
+	m_currentIndexSummaries = snapshot.m_indexSummaries;
 	m_indexList->Freeze();
 	m_indexList->DeleteAllItems();
 	for (size_t i = 0; i < snapshot.m_indexSummaries.size(); ++i)

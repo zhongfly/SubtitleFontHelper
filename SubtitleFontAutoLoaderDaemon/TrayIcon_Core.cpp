@@ -1,9 +1,8 @@
 #include "pch.h"
 #include "TrayIconImpl.h"
 
-sfh::SystemTray::Implementation::Implementation(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider)
-	: m_daemon(daemon),
-	  m_trayUiDataProvider(trayUiDataProvider)
+sfh::SystemTray::Implementation::Implementation(IDaemon* daemon)
+	: m_daemon(daemon)
 {
 	m_startEvent.create(wil::EventOptions::ManualReset);
 	m_trayThread = std::thread([&]()
@@ -13,7 +12,6 @@ sfh::SystemTray::Implementation::Implementation(IDaemon* daemon, ITrayUiDataProv
 			return;
 		try
 		{
-			ResolveLogsPath();
 			SetupMessageWindow();
 			MessageLoop();
 		}
@@ -39,47 +37,10 @@ sfh::SystemTray::Implementation::~Implementation()
 	m_trayAnimationCache.reset();
 	m_loadingGifStream.reset();
 	m_doneGifStream.reset();
-	if (m_toolWindowFont != nullptr)
-	{
-		DeleteObject(m_toolWindowFont);
-	}
-	if (m_toolWindowTitleFont != nullptr)
-	{
-		DeleteObject(m_toolWindowTitleFont);
-	}
-	if (m_toolWindowSectionFont != nullptr)
-	{
-		DeleteObject(m_toolWindowSectionFont);
-	}
-	if (m_windowBackgroundBrush != nullptr)
-	{
-		DeleteObject(m_windowBackgroundBrush);
-	}
-	if (m_panelBackgroundBrush != nullptr)
-	{
-		DeleteObject(m_panelBackgroundBrush);
-	}
-	if (m_metadataBackgroundBrush != nullptr)
-	{
-		DeleteObject(m_metadataBackgroundBrush);
-	}
-	if (m_logBackgroundBrush != nullptr)
-	{
-		DeleteObject(m_logBackgroundBrush);
-	}
-	if (m_inputBackgroundBrush != nullptr)
-	{
-		DeleteObject(m_inputBackgroundBrush);
-	}
 	if (m_gdiplusToken != 0)
 	{
 		Gdiplus::GdiplusShutdown(m_gdiplusToken);
 		m_gdiplusToken = 0;
-	}
-	if (m_richEditModule != nullptr)
-	{
-		FreeLibrary(m_richEditModule);
-		m_richEditModule = nullptr;
 	}
 }
 
@@ -104,14 +65,6 @@ void sfh::SystemTray::Implementation::NotifyFinishLoad()
 	m_startupLoading = false;
 	if (m_hWnd != nullptr)
 		PostMessageW(m_hWnd, WM_UPDATE_TRAY_ICON_MESSAGE, 0, 0);
-}
-
-void sfh::SystemTray::Implementation::NotifyFontUiDataChanged()
-{
-	if (m_hWnd != nullptr)
-	{
-		PostMessageW(m_hWnd, WM_FONT_UI_DATA_CHANGED, 0, 0);
-	}
 }
 
 bool sfh::SystemTray::Implementation::IsLoading() const
@@ -501,14 +454,6 @@ void sfh::SystemTray::Implementation::DestroyCurrentOwnedTrayIcon()
 
 void sfh::SystemTray::Implementation::SetupMessageWindow()
 {
-	INITCOMMONCONTROLSEX commonControls{};
-	commonControls.dwSize = sizeof(commonControls);
-	commonControls.dwICC = ICC_LISTVIEW_CLASSES;
-	InitCommonControlsEx(&commonControls);
-
-	DetectDarkMode();
-	RecreateThemeBrushes();
-
 	WNDCLASSW wndClass;
 	RtlZeroMemory(&wndClass, sizeof(wndClass));
 	wndClass.lpfnWndProc = WindowProc;
@@ -519,19 +464,6 @@ void sfh::SystemTray::Implementation::SetupMessageWindow()
 	wndClass.lpszClassName = TRAY_WINDOW_CLASS_NAME;
 
 	THROW_LAST_ERROR_IF(RegisterClassW(&wndClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS);
-
-	WNDCLASSW toolWndClass;
-	RtlZeroMemory(&toolWndClass, sizeof(toolWndClass));
-	toolWndClass.lpfnWndProc = ToolWindowProc;
-	toolWndClass.hInstance = wil::GetModuleInstanceHandle();
-	toolWndClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-	toolWndClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-	toolWndClass.hbrBackground = m_windowBackgroundBrush != nullptr
-		? m_windowBackgroundBrush
-		: reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-	toolWndClass.lpszClassName = TOOL_WINDOW_CLASS_NAME;
-
-	THROW_LAST_ERROR_IF(RegisterClassW(&toolWndClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS);
 
 	THROW_LAST_ERROR_IF(
 		CreateWindowExW(
@@ -712,15 +644,8 @@ LRESULT sfh::SystemTray::Implementation::MessageHandler(HWND hWnd, UINT uMsg, WP
 	case WM_ENDSESSION:
 		m_daemon->NotifyExit();
 		break;
-	case WM_SETTINGCHANGE:
-		DetectDarkMode();
-		RecreateThemeBrushes();
-		RefreshThemeForOpenWindows();
-		break;
 	case WM_CLOSE:
 		KillTimer(hWnd, TRAY_REFRESH_TIMER_ID);
-		DestroyToolWindow(m_fontsWindow);
-		DestroyToolWindow(m_logsWindow);
 		DestroyTrayIcon();
 		DestroyWindow(hWnd);
 		break;
@@ -735,9 +660,6 @@ LRESULT sfh::SystemTray::Implementation::MessageHandler(HWND hWnd, UINT uMsg, WP
 		return 0;
 	case WM_UPDATE_TRAY_ICON_MESSAGE:
 		SetupTrayIcon(false, false);
-		return 0;
-	case WM_FONT_UI_DATA_CHANGED:
-		RefreshFontsWindowContent();
 		return 0;
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
@@ -797,8 +719,8 @@ LRESULT CALLBACK sfh::SystemTray::Implementation::WindowProc(HWND hWnd, UINT uMs
 }
 
 // pImpl bridge
-sfh::SystemTray::SystemTray(IDaemon* daemon, ITrayUiDataProvider* trayUiDataProvider)
-	: m_impl(std::make_unique<Implementation>(daemon, trayUiDataProvider))
+sfh::SystemTray::SystemTray(IDaemon* daemon)
+	: m_impl(std::make_unique<Implementation>(daemon))
 {
 }
 
@@ -817,9 +739,4 @@ void sfh::SystemTray::SetManagedIndexTrayProgress(const ManagedIndexTrayProgress
 void sfh::SystemTray::NotifyFinishLoad()
 {
 	m_impl->NotifyFinishLoad();
-}
-
-void sfh::SystemTray::NotifyFontUiDataChanged()
-{
-	m_impl->NotifyFontUiDataChanged();
 }

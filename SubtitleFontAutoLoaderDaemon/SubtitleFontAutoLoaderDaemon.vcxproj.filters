@@ -36,13 +36,7 @@
     <ClCompile Include="TrayIcon_Theme.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="TrayIcon_FontsWindow.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="TrayIcon_LogsWindow.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="TrayIcon_ToolWindowProc.cpp">
+    <ClCompile Include="TrayIcon_StandaloneUi.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="QueryService.cpp">

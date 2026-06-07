@@ -10,8 +10,8 @@
 #include <wx/checkbox.h>
 #include <wx/frame.h>
 #include <wx/panel.h>
+#include <wx/stc/stc.h>
 #include <wx/stattext.h>
-#include <wx/textctrl.h>
 #include <wx/timer.h>
 
 namespace sfh::ui
@@ -29,7 +29,8 @@ namespace sfh::ui
 		void ApplyWindowMetrics();
 		void UpdateWrappedLabels();
 		void SetStatusLabelText(const wxString& text);
-		void ApplyLogTextFormatting();
+		void ApplyLogTextFormatting(std::wstring_view controlText);
+		bool IsLogViewMouseInteractionActive() const;
 		void RefreshLogsContent(bool forceReload);
 		void UpdateLogsText(const std::wstring& statusText, const std::wstring& contentText, bool scrollToBottom);
 		void ScrollLogsToBottom();
@@ -61,7 +62,7 @@ namespace sfh::ui
 		wxStaticText* m_contentSectionText = nullptr;
 		wxCheckBox* m_autoScrollCheck = nullptr;
 		wxButton* m_scrollBottomButton = nullptr;
-		wxTextCtrl* m_logText = nullptr;
+		wxStyledTextCtrl* m_logText = nullptr;
 		wxTimer m_refreshTimer;
 		bool m_autoScrollEnabled = true;
 		bool m_hasAppliedInitialWindowSize = false;

@@ -1,5 +1,6 @@
 #include "FontsFrame.h"
 
+#include <array>
 #include <stdexcept>
 #include <string>
 
@@ -7,6 +8,7 @@
 #include <wx/dataobj.h>
 #include <wx/font.h>
 #include <wx/panel.h>
+#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/utils.h>
 
@@ -27,12 +29,15 @@ sfh::ui::FontsFrame::FontsFrame(const LauncherConfig& config)
 {
 	SetMinSize(wxSize(860, 700));
 	BuildLayout();
+	ApplyWindowMetrics();
 	Bind(wxEVT_TEXT, &FontsFrame::OnSearchTextChanged, this, m_searchCtrl->GetId());
 	Bind(wxEVT_SEARCHCTRL_CANCEL_BTN, &FontsFrame::OnSearchCancel, this, m_searchCtrl->GetId());
 	Bind(wxEVT_TIMER, &FontsFrame::OnSearchTimer, this, SEARCH_DEBOUNCE_TIMER_ID);
 	Bind(wxEVT_TIMER, &FontsFrame::OnRefreshTimer, this, REFRESH_TIMER_ID);
 	Bind(wxEVT_LIST_ITEM_ACTIVATED, &FontsFrame::OnResultActivated, this, m_resultList->GetId());
 	Bind(wxEVT_THREAD, &FontsFrame::OnWorkerResult, this);
+	Bind(wxEVT_SIZE, &FontsFrame::OnSize, this);
+	Bind(wxEVT_DPI_CHANGED, &FontsFrame::OnDpiChanged, this);
 	Bind(wxEVT_CLOSE_WINDOW, &FontsFrame::OnCloseWindow, this);
 
 	StartWorker();
@@ -59,7 +64,8 @@ void sfh::ui::FontsFrame::BuildLayout()
 	titleFont.SetWeight(wxFONTWEIGHT_BOLD);
 	m_titleText->SetFont(titleFont);
 
-	m_statusText = new wxStaticText(m_panel, wxID_ANY, L"正在连接 daemon...");
+	m_statusLabelTextValue = L"正在连接 daemon...";
+	m_statusText = new wxStaticText(m_panel, wxID_ANY, m_statusLabelTextValue);
 	m_indexesSectionText = new wxStaticText(m_panel, wxID_ANY, L"已加载索引");
 	wxFont sectionFont = m_indexesSectionText->GetFont();
 	sectionFont.SetWeight(wxFONTWEIGHT_BOLD);
@@ -80,7 +86,8 @@ void sfh::ui::FontsFrame::BuildLayout()
 	m_searchCtrl->ShowCancelButton(true);
 	m_searchCtrl->SetDescriptiveText(L"搜索族名、完整名称或 PostScript 名称");
 
-	m_searchSummaryText = new wxStaticText(m_panel, wxID_ANY, L"输入字体名称进行搜索。");
+	m_searchSummaryLabelTextValue = L"输入字体名称进行搜索。";
+	m_searchSummaryText = new wxStaticText(m_panel, wxID_ANY, m_searchSummaryLabelTextValue);
 
 	m_resultList = new wxListCtrl(
 		m_panel,
@@ -102,6 +109,65 @@ void sfh::ui::FontsFrame::BuildLayout()
 	m_panel->SetSizer(rootSizer);
 }
 
+void sfh::ui::FontsFrame::ApplyWindowMetrics()
+{
+	if (m_panel == nullptr)
+	{
+		return;
+	}
+
+	const int margin = FromDIP(16);
+	wxFont baseFont = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+	if (!baseFont.IsOk())
+	{
+		baseFont = GetFont();
+	}
+	if (baseFont.IsOk())
+	{
+		wxFont titleFont = baseFont;
+		titleFont.SetPointSize(baseFont.GetPointSize() + 4);
+		titleFont.SetWeight(wxFONTWEIGHT_BOLD);
+
+		wxFont sectionFont = baseFont;
+		sectionFont.SetWeight(wxFONTWEIGHT_BOLD);
+
+		m_panel->SetFont(baseFont);
+		m_titleText->SetFont(titleFont);
+		m_statusText->SetFont(baseFont);
+		m_indexesSectionText->SetFont(sectionFont);
+		m_indexList->SetFont(baseFont);
+		m_searchSectionText->SetFont(sectionFont);
+		m_searchCtrl->SetFont(baseFont);
+		m_searchSummaryText->SetFont(baseFont);
+		m_resultList->SetFont(baseFont);
+	}
+
+	if (!m_hasAppliedInitialWindowSize)
+	{
+		SetSize(FromDIP(wxSize(980, 820)));
+		m_hasAppliedInitialWindowSize = true;
+	}
+
+	SetMinSize(FromDIP(wxSize(860, 700)));
+
+	auto* rootSizer = m_panel->GetSizer();
+	if (rootSizer != nullptr)
+	{
+		if (auto* item = rootSizer->GetItem(m_titleText)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_statusText)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_indexesSectionText)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_indexList)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_searchSectionText)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_searchCtrl)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_searchSummaryText)) item->SetBorder(margin);
+		if (auto* item = rootSizer->GetItem(m_resultList)) item->SetBorder(margin);
+	}
+
+	UpdateWrappedLabels();
+	UpdateListColumnWidths();
+	Layout();
+}
+
 void sfh::ui::FontsFrame::ConfigureIndexList()
 {
 	m_indexList->AppendColumn(L"索引", wxLIST_FORMAT_LEFT, 420);
@@ -118,6 +184,83 @@ void sfh::ui::FontsFrame::ConfigureResultList()
 	m_resultList->AppendColumn(L"序号", wxLIST_FORMAT_LEFT, 70);
 	m_resultList->AppendColumn(L"索引", wxLIST_FORMAT_LEFT, 210);
 	m_resultList->AppendColumn(L"路径", wxLIST_FORMAT_LEFT, 280);
+}
+
+void sfh::ui::FontsFrame::UpdateListColumnWidths()
+{
+	auto updateColumns = [this](wxListCtrl* list, const auto& nominalWidths, const auto& minimumWidths)
+	{
+		if (list == nullptr)
+		{
+			return;
+		}
+
+		const int availableWidth = list->GetClientSize().GetWidth();
+		if (availableWidth <= 0)
+		{
+			return;
+		}
+
+		int totalNominal = 0;
+		for (int width : nominalWidths)
+		{
+			totalNominal += width;
+		}
+
+		int assignedWidth = 0;
+		for (size_t i = 0; i < nominalWidths.size(); ++i)
+		{
+			int width = std::max(FromDIP(minimumWidths[i]), availableWidth * nominalWidths[i] / totalNominal);
+			if (i + 1 == nominalWidths.size())
+			{
+				width = std::max(FromDIP(minimumWidths[i]), availableWidth - assignedWidth);
+			}
+
+			list->SetColumnWidth(static_cast<int>(i), width);
+			assignedWidth += width;
+		}
+	};
+
+	updateColumns(
+		m_indexList,
+		std::array<int, 3>{ 420, 120, 120 },
+		std::array<int, 3>{ 180, 90, 90 });
+	updateColumns(
+		m_resultList,
+		std::array<int, 7>{ 180, 170, 190, 170, 70, 210, 280 },
+		std::array<int, 7>{ 120, 110, 120, 110, 55, 120, 160 });
+}
+
+void sfh::ui::FontsFrame::UpdateWrappedLabels()
+{
+	if (m_panel == nullptr)
+	{
+		return;
+	}
+
+	const int wrapWidth = std::max(FromDIP(220), m_panel->GetClientSize().GetWidth() - FromDIP(32));
+	m_statusText->SetLabel(m_statusLabelTextValue);
+	m_statusText->Wrap(wrapWidth);
+	m_searchSummaryText->SetLabel(m_searchSummaryLabelTextValue);
+	m_searchSummaryText->Wrap(wrapWidth);
+}
+
+void sfh::ui::FontsFrame::SetStatusLabelText(const wxString& text)
+{
+	m_statusLabelTextValue = text;
+	if (m_statusText != nullptr)
+	{
+		m_statusText->SetLabel(m_statusLabelTextValue);
+	}
+}
+
+void sfh::ui::FontsFrame::SetSearchSummaryLabelText(const wxString& text)
+{
+	m_searchSummaryLabelTextValue = text;
+	if (m_searchSummaryText != nullptr)
+	{
+		m_searchSummaryText->SetLabel(m_searchSummaryLabelTextValue);
+	}
 }
 
 void sfh::ui::FontsFrame::RequestRefresh()
@@ -233,20 +376,24 @@ void sfh::ui::FontsFrame::ApplyWorkerResults()
 
 void sfh::ui::FontsFrame::ApplySnapshot(const FontUiSnapshotData& snapshot, std::wstring_view query)
 {
-	m_statusText->SetLabel(ToWxString(snapshot.m_statusMessage));
+	SetStatusLabelText(ToWxString(snapshot.m_statusMessage));
 	PopulateIndexList(snapshot);
 	PopulateResultList(snapshot);
 	UpdateSearchSummary(snapshot, query);
+	UpdateWrappedLabels();
+	UpdateListColumnWidths();
 	Layout();
 }
 
 void sfh::ui::FontsFrame::ApplyRefreshFailure(std::wstring_view message)
 {
-	m_statusText->SetLabel(ToWxString(message));
-	m_searchSummaryText->SetLabel(L"当前无法获取字体数据。");
+	SetStatusLabelText(ToWxString(message));
+	SetSearchSummaryLabelText(L"当前无法获取字体数据。");
 	m_currentResults.clear();
 	m_indexList->DeleteAllItems();
 	m_resultList->DeleteAllItems();
+	UpdateWrappedLabels();
+	UpdateListColumnWidths();
 	Layout();
 }
 
@@ -287,7 +434,7 @@ void sfh::ui::FontsFrame::UpdateSearchSummary(const FontUiSnapshotData& snapshot
 {
 	if (query.empty())
 	{
-		m_searchSummaryText->SetLabel(L"输入字体名称进行搜索。");
+		SetSearchSummaryLabelText(L"输入字体名称进行搜索。");
 		return;
 	}
 
@@ -296,7 +443,7 @@ void sfh::ui::FontsFrame::UpdateSearchSummary(const FontUiSnapshotData& snapshot
 	{
 		summary += L" 结果已截断，仅显示前 500 条。";
 	}
-	m_searchSummaryText->SetLabel(ToWxString(summary));
+	SetSearchSummaryLabelText(ToWxString(summary));
 }
 
 void sfh::ui::FontsFrame::CopyResultFieldToClipboard(size_t rowIndex, bool copyDisplayName)
@@ -355,6 +502,32 @@ void sfh::ui::FontsFrame::OnWorkerResult(wxThreadEvent& event)
 		ApplyWorkerResults();
 	}
 	event.Skip();
+}
+
+void sfh::ui::FontsFrame::OnSize(wxSizeEvent& event)
+{
+	event.Skip();
+	CallAfter([this]()
+	{
+		if (!m_isClosing)
+		{
+			UpdateWrappedLabels();
+			Layout();
+			UpdateListColumnWidths();
+		}
+	});
+}
+
+void sfh::ui::FontsFrame::OnDpiChanged(wxDPIChangedEvent& event)
+{
+	event.Skip();
+	CallAfter([this]()
+	{
+		if (!m_isClosing)
+		{
+			ApplyWindowMetrics();
+		}
+	});
 }
 
 void sfh::ui::FontsFrame::OnCloseWindow(wxCloseEvent& event)

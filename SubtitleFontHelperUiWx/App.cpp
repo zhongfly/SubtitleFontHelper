@@ -40,6 +40,7 @@ bool sfh::ui::App::OnInit()
 {
 	try
 	{
+		SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 		m_config = ParseLauncherConfig();
 		m_singleInstance = std::make_unique<SingleInstance>(BuildSingleInstanceMutexName(m_config));
 		if (!m_singleInstance->IsPrimaryInstance())

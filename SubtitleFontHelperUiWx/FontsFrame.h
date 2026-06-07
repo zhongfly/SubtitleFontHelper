@@ -27,8 +27,13 @@ namespace sfh::ui
 
 	private:
 		void BuildLayout();
+		void ApplyWindowMetrics();
 		void ConfigureIndexList();
 		void ConfigureResultList();
+		void UpdateListColumnWidths();
+		void UpdateWrappedLabels();
+		void SetStatusLabelText(const wxString& text);
+		void SetSearchSummaryLabelText(const wxString& text);
 		void RequestRefresh();
 		void StartWorker();
 		void StopWorker();
@@ -47,6 +52,8 @@ namespace sfh::ui
 		void OnRefreshTimer(wxTimerEvent& event);
 		void OnResultActivated(wxListEvent& event);
 		void OnWorkerResult(wxThreadEvent& event);
+		void OnSize(wxSizeEvent& event);
+		void OnDpiChanged(wxDPIChangedEvent& event);
 		void OnCloseWindow(wxCloseEvent& event);
 
 	private:
@@ -86,5 +93,8 @@ namespace sfh::ui
 		bool m_workerStop = false;
 		std::vector<FontUiSearchResultData> m_currentResults;
 		bool m_isClosing = false;
+		bool m_hasAppliedInitialWindowSize = false;
+		wxString m_statusLabelTextValue;
+		wxString m_searchSummaryLabelTextValue;
 	};
 }

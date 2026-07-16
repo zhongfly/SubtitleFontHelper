@@ -443,6 +443,45 @@ namespace FontIndexCore
 		}
 	}
 
+	bool IsValidFontFile(const std::filesystem::path& path, std::string& errorMessage)
+	{
+		errorMessage.clear();
+		std::error_code ec;
+		if (!std::filesystem::is_regular_file(path, ec) || ec)
+		{
+			errorMessage = ec
+				? "filesystem error " + std::to_string(ec.value())
+				: "file does not exist or is not a regular file";
+			return false;
+		}
+		if (!IsSupportedFontFile(path))
+		{
+			errorMessage = "unsupported font file extension";
+			return false;
+		}
+
+		try
+		{
+			FontAnalyzer analyzer;
+			if (analyzer.AnalyzeFontFile(path.c_str()).empty())
+			{
+				errorMessage = "font file contains no faces";
+				return false;
+			}
+			return true;
+		}
+		catch (const std::bad_alloc&)
+		{
+			errorMessage = "font validation failed: out of memory";
+			return false;
+		}
+		catch (const std::exception& e)
+		{
+			errorMessage = e.what();
+			return false;
+		}
+	}
+
 	sfh::FontDatabase BuildFontDatabase(
 		const std::vector<std::filesystem::path>& fontFiles,
 		size_t workerCount,

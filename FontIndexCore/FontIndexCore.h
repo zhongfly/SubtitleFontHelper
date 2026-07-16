@@ -61,6 +61,7 @@ namespace FontIndexCore
 	void ThrowIfCancelled(const std::function<bool()>& isCancelled);
 
 	bool IsSupportedFontFile(const std::filesystem::path& path);
+	bool IsValidFontFile(const std::filesystem::path& path, std::string& errorMessage);
 	std::filesystem::path NormalizePath(const std::filesystem::path& path);
 	bool TryCaptureDirectorySnapshotEntry(const std::filesystem::path& path, DirectorySnapshotEntry& entry);
 	std::vector<FontSourceFile> EnumerateFontFiles(

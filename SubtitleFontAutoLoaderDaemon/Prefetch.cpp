@@ -10,6 +10,7 @@
 #include "Common.h"
 #include "EventLog.h"
 #include "ToastNotifier.h"
+#include "../FontIndexCore/FontIndexCore.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -500,7 +501,26 @@ private:
 			if (line.empty())
 				continue;
 			auto wideLine = Utf8ToWideString(line);
-			Load(wideLine);
+			std::string validationError;
+			if (!FontIndexCore::IsValidFontFile(wideLine, validationError))
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"prefetch cache skip invalid font: path=%ls error=\"%ls\"",
+					wideLine.c_str(),
+					Utf8ToWideString(validationError).c_str());
+				continue;
+			}
+			try
+			{
+				Load(wideLine);
+			}
+			catch (const std::runtime_error& e)
+			{
+				EventLog::GetInstance().LogDebugMessage(
+					L"prefetch cache skip load failure: path=%ls error=\"%ls\"",
+					wideLine.c_str(),
+					Utf8ToWideString(e.what()).c_str());
+			}
 		}
 	}
 

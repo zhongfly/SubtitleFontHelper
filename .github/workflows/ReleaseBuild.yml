@@ -16,7 +16,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.platform }}
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +47,6 @@ jobs:
       with:
         path: |
           vcpkg_binary_cache\
-          vcpkg_installed\${{ matrix.triplet }}\
         key: ${{ runner.os }}-${{ matrix.triplet }}-vcpkg-${{ hashFiles('vcpkg.json') }}
         restore-keys: ${{ runner.os }}-${{ matrix.triplet }}-vcpkg-
 
@@ -80,7 +79,7 @@ jobs:
 
     - name: Build ${{ matrix.platform }}
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} /p:VcpkgManifestInstall=false ${{env.SOLUTION_FILE_PATH}}
+      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v145 /p:VcpkgManifestInstall=false ${{env.SOLUTION_FILE_PATH}}
 
     - name: Upload build output
       uses: actions/upload-artifact@v7

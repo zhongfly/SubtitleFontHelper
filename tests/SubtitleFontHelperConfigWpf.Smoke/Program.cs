@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using SubtitleFontHelperConfigWpf.Models;
 using SubtitleFontHelperConfigWpf.Services;
+using SubtitleFontHelperConfigWpf.ViewModels;
 
 const int ExpectedMonitorCount = 2;
 const int ExpectedIndexCount = 1;
@@ -116,6 +117,42 @@ source_folders = [
     Expect(model.MonitorProcesses.Single() == @"C:\Players\mpc-hc64_nvo.exe", "literal monitor_processes should keep backslashes");
     Expect(model.IndexFiles.Single().Path == @"D:\Fonts\FontIndex.xml", "literal index path should keep backslashes");
     Expect(model.IndexFiles.Single().SourceFolders.Single() == @"D:\Fonts\Library", "literal source_folders should keep backslashes");
+});
+
+Run("failed reload cannot overwrite config", () =>
+{
+    string path = Path.Combine(tempRoot, $"failed-reload-{Guid.NewGuid():N}.toml");
+    try
+    {
+        File.WriteAllText(path, """
+wmi_poll_interval = 500
+lru_size = 100
+monitor_processes = []
+""", new UTF8Encoding(false));
+
+        var viewModel = new MainWindowViewModel(
+            path,
+            service,
+            new DialogService(),
+            new ProcessPickerService());
+        Expect(viewModel.SaveCommand.CanExecute(null), "save should be enabled after a successful load");
+
+        viewModel.DataPath = "pending-change";
+        const string invalidConfig = "wmi_poll_interval = invalid\n";
+        File.WriteAllText(path, invalidConfig, new UTF8Encoding(false));
+        viewModel.ReloadCommand.Execute(null);
+
+        Expect(!viewModel.SaveCommand.CanExecute(null), "save should be disabled after a failed reload");
+        Expect(viewModel.IsDirty, "failed reload should preserve the dirty state");
+        Expect(viewModel.DataPath == "pending-change", "failed reload should preserve the current model");
+
+        viewModel.SaveCommand.Execute(null);
+        Expect(File.ReadAllText(path, new UTF8Encoding(false, true)) == invalidConfig, "failed reload must not overwrite the config file");
+    }
+    finally
+    {
+        File.Delete(path);
+    }
 });
 
 Run("rundll32 validation", () =>

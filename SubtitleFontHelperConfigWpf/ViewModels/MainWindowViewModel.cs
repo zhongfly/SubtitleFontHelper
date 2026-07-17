@@ -19,6 +19,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private Window? m_window;
     private bool m_allowImmediateClose;
+    private bool m_canSaveConfig;
     private bool m_isDirty;
     private string m_statusMessage = "准备就绪";
     private string m_dataPath = string.Empty;
@@ -43,7 +44,7 @@ public sealed class MainWindowViewModel : ObservableObject
         m_dialogService = dialogService;
         m_processPickerService = processPickerService;
 
-        SaveCommand = new RelayCommand(Save);
+        SaveCommand = new RelayCommand(Save, () => m_canSaveConfig);
         ReloadCommand = new RelayCommand(Reload);
         CloseCommand = new RelayCommand(CloseWindow);
         BrowseDataPathCommand = new RelayCommand(BrowseDataPath);
@@ -527,19 +528,23 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             ConfigModel model = m_configFileService.Load(m_configPath);
             ApplyModel(model);
+            m_canSaveConfig = true;
             IsDirty = false;
             StatusMessage = showSuccessMessage ? "已从磁盘重新加载配置" : "配置已加载";
         }
         catch (Exception ex)
         {
+            m_canSaveConfig = false;
             if (m_window is not null)
             {
-                m_dialogService.ShowWarning(m_window, $"无法读取配置文件：\n{m_configPath}\n\n{ex.Message}\n\n将以空配置打开。");
+                m_dialogService.ShowWarning(m_window, $"无法读取配置文件：\n{m_configPath}\n\n{ex.Message}\n\n当前内容未更改，已禁止保存。");
             }
 
-            ApplyModel(new ConfigModel());
-            IsDirty = false;
-            StatusMessage = "读取失败，已切换为空配置";
+            StatusMessage = "读取失败，当前内容未更改，已禁止保存";
+        }
+        finally
+        {
+            SaveCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -626,6 +631,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void SaveCore()
     {
+        if (!m_canSaveConfig)
+        {
+            throw new InvalidOperationException("配置文件读取失败。为避免覆盖原文件，请修复配置文件并重新加载后再保存。");
+        }
+
         ConfigModel model = BuildModel();
         m_configFileService.Save(m_configPath, model);
         IsDirty = false;

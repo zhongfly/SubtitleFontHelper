@@ -169,7 +169,7 @@ public:
 	{
 		m_configSnapshots.emplace(0, ConfigSnapshot{ {}, interval });
 		m_startEvent.create(wil::EventOptions::ManualReset);
-		m_worker = std::thread([&]()
+		m_worker = std::thread([this]()
 		{
 			++m_checkPoint;
 			if (WaitForSingleObject(m_startEvent.get(), INFINITE) != WAIT_OBJECT_0 || m_exitFlag.load())
@@ -186,7 +186,7 @@ public:
 					m_workerException = exception;
 				}
 				m_configStateCV.notify_all();
-				daemon->NotifyException(exception);
+				m_daemon->NotifyException(exception);
 			}
 		});
 		while (m_checkPoint.load() == 0)

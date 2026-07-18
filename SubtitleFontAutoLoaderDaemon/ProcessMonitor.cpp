@@ -81,6 +81,7 @@ private:
 	uint64_t m_appliedConfigRevision = 0;
 	uint64_t m_failedConfigRevision = 0;
 	std::exception_ptr m_failedConfigException;
+	std::exception_ptr m_workerException;
 
 	std::atomic<size_t> m_checkPoint = 0;
 	std::atomic<bool> m_exitFlag = false;
@@ -179,13 +180,13 @@ public:
 			}
 			catch (...)
 			{
+				auto exception = std::current_exception();
 				{
 					std::lock_guard lg(m_configStateLock);
-					m_failedConfigRevision = m_requestedConfigRevision.load();
-					m_failedConfigException = std::current_exception();
+					m_workerException = exception;
 				}
 				m_configStateCV.notify_all();
-				daemon->NotifyException(std::current_exception());
+				daemon->NotifyException(exception);
 			}
 		});
 		while (m_checkPoint.load() == 0)
@@ -225,13 +226,14 @@ public:
 		{
 			return m_exitFlag.load()
 				|| m_appliedConfigRevision == revision
-				|| m_failedConfigRevision == revision;
+				|| m_failedConfigRevision == revision
+				|| m_workerException != nullptr;
 		});
 		if (m_exitFlag.load())
 			throw std::runtime_error("process monitor stopped before applying configuration");
-		if (m_failedConfigRevision == revision)
+		if (m_workerException != nullptr || m_failedConfigRevision == revision)
 		{
-			auto exception = m_failedConfigException;
+			auto exception = m_workerException != nullptr ? m_workerException : m_failedConfigException;
 			ul.unlock();
 			{
 				std::lock_guard lg(m_accessLock);

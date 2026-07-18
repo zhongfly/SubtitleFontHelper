@@ -426,6 +426,78 @@ try {
 	Stop-TestProcess -Process $daemonProcess
 	$daemonProcess = $null
 
+	$retryFace = 'SubtitleFontHelper Retry Smoke'
+	$retryFontDirectory = Join-Path $workDirectory 'retry-font'
+	$null = New-Item -ItemType Directory -Path $retryFontDirectory -Force
+	$retryFontPathA = Join-Path $retryFontDirectory 'retry-a.ttf'
+	$retryFontPathB = Join-Path $retryFontDirectory 'retry-b.ttf'
+	$retryFontBackupPath = Join-Path $retryFontDirectory 'retry-b.ttf.missing'
+	Copy-Item -LiteralPath $fontsB[0].SourcePath -Destination $retryFontPathA -Force
+	Copy-Item -LiteralPath $fontsB[1].SourcePath -Destination $retryFontPathB -Force
+
+	$retryIndexPath = Join-Path $workDirectory 'indexes/RetryIndex.xml'
+	$retryIndex = @"
+<FontDatabase>
+  <FontFace path="../retry-font/retry-a.ttf" index="0" weight="400" oblique="0" psOutline="1">
+    <Win32FamilyName>$retryFace</Win32FamilyName>
+  </FontFace>
+  <FontFace path="../retry-font/retry-b.ttf" index="0" weight="400" oblique="0" psOutline="1">
+    <Win32FamilyName>$retryFace</Win32FamilyName>
+  </FontFace>
+</FontDatabase>
+"@
+	Set-Content -LiteralPath $retryIndexPath -Value $retryIndex -Encoding utf8NoBOM
+
+	$retryConfig = @(
+		'wmi_poll_interval = 1000'
+		'lru_size = 10'
+		"data_path = 'data'"
+		'monitor_processes = []'
+		''
+		'[[index_files]]'
+		"path = 'indexes/RetryIndex.xml'"
+	) -join "`n"
+	Set-Content -LiteralPath $configPath -Value $retryConfig -Encoding utf8NoBOM
+	Start-Sleep -Milliseconds 500
+
+	$lineCountBeforeRetry = (Get-LogLines -LogPath $logPath).Count
+	$daemonProcess = Start-DaemonProcess -WorkingDirectory $workDirectory
+	$null = Wait-ForLogPattern -LogPath $logPath -Pattern ([regex]'BumpVersion old=\d+ new=\d+') -Description 'retry test index publication' -WatchedProcesses @($daemonProcess) -StartLine $lineCountBeforeRetry
+	Move-Item -LiteralPath $retryFontPathB -Destination $retryFontBackupPath
+
+	$clientProcess = Start-SmokeClientProcess -WorkingDirectory $workDirectory -FaceName $retryFace
+	$clientPid = $clientProcess.Id
+	Start-Sleep -Milliseconds 500
+	$injectorProcess = Start-DirectInjectionProcess -WorkingDirectory $workDirectory -ProcessId $clientPid
+	if (-not $injectorProcess.WaitForExit($TimeoutSec * 1000)) {
+		throw "retry test injection helper did not exit within ${TimeoutSec}s.`n$(Get-LogTail -LogPath $logPath)"
+	}
+	$injectorProcess.Refresh()
+	if ($injectorProcess.ExitCode -ne 0) {
+		throw "retry test injection helper exited with code $($injectorProcess.ExitCode).`n$(Get-LogTail -LogPath $logPath)"
+	}
+
+	$queryPrefix = [regex]::Escape("QueryFailure request=`"$retryFace`"")
+	$loadFailure = Wait-ForLogPattern -LogPath $logPath -Pattern ([regex]($queryPrefix + '.*AddFontResourceExW failed.*rolled back 1 font resource\(s\)')) -Description 'partial font load rollback before retry' -WatchedProcesses @($daemonProcess, $clientProcess) -StartLine $lineCountBeforeRetry
+	$querySuccessPattern = [regex]::Escape("QuerySuccess request=`"$retryFace`" source=`"index`"")
+	Assert-NoLogPattern -LogPath $logPath -Pattern ([regex]$querySuccessPattern) -StartLine $lineCountBeforeRetry -Description 'query succeeded before the missing font was restored'
+	$loadFontPattern = [regex]::Escape("LoadFont path=`"$retryFontPathA`"")
+	Assert-NoLogPattern -LogPath $logPath -Pattern ([regex]$loadFontPattern) -StartLine $lineCountBeforeRetry -Description 'rolled back font was logged as loaded'
+	Move-Item -LiteralPath $retryFontBackupPath -Destination $retryFontPathB
+
+	$null = Wait-ForLogPattern -LogPath $logPath -Pattern ([regex]$querySuccessPattern) -Description 'font load retry success' -WatchedProcesses @($daemonProcess, $clientProcess) -StartLine ($loadFailure.LineIndex + 1)
+	if (-not $clientProcess.WaitForExit($TimeoutSec * 1000)) {
+		throw "retry test client did not exit within ${TimeoutSec}s.`n$(Get-LogTail -LogPath $logPath)"
+	}
+	$clientProcess.Refresh()
+	if ($clientProcess.ExitCode -ne 0) {
+		throw "retry test client exited with code $($clientProcess.ExitCode).`n$(Get-LogTail -LogPath $logPath)"
+	}
+	Stop-TestProcess -Process $daemonProcess
+	$daemonProcess = $null
+	$clientProcess = $null
+	$injectorProcess = $null
+
 	$phase4Directory = Join-Path $workDirectory 'phase4-injection'
 	$null = New-Item -ItemType Directory -Path $phase4Directory -Force
 	Copy-Item -LiteralPath (Join-Path $binaryRootPath 'SmokeFontClient.exe') -Destination (Join-Path $phase4Directory 'SmokeFontClient.exe') -Force

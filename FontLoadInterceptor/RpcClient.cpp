@@ -494,6 +494,21 @@ namespace sfh
 		IndexFont
 	};
 
+	std::string BuildFontResourceErrorMessage(const char* operation, const std::wstring& path)
+	{
+		const auto error = GetLastError();
+		std::string message = operation;
+		message += " failed: ";
+		message += WideToUtf8String(path);
+		if (error != ERROR_SUCCESS)
+		{
+			message += " (Win32 error ";
+			message += std::to_string(error);
+			message += ")";
+		}
+		return message;
+	}
+
 	QueryResolution TryLoad(const wchar_t* query, const FontQueryResponse& response, std::vector<std::wstring>& loadedPaths)
 	{
 		struct EnumInfo
@@ -538,32 +553,63 @@ namespace sfh
 			}, reinterpret_cast<LPARAM>(&enumInfo), 0);
 		}
 
-		FontLoadFeedback feedback;
-		bool hasFeedback = false;
-
-		for (int i = 0; i < response.fonts_size(); ++i)
+		loadedPaths.reserve(response.fonts_size());
+		try
 		{
-			if (enumInfo.maskedFace[i])continue;
-			auto path = Utf8ToWideString(response.fonts()[i].path());
-			loadedPaths.emplace_back(path);
-			feedback.add_path(response.fonts()[i].path());
-			hasFeedback = true;
-
-			AddFontResourceExW(path.c_str(), FR_PRIVATE, nullptr);
-
-			EventLog::GetInstance().LogDllLoadFont(GetCurrentProcessId(), GetCurrentThreadId(), path.c_str());
+			for (int i = 0; i < response.fonts_size(); ++i)
+			{
+				if (enumInfo.maskedFace[i])continue;
+				auto path = Utf8ToWideString(response.fonts()[i].path());
+				SetLastError(ERROR_SUCCESS);
+				if (AddFontResourceExW(path.c_str(), FR_PRIVATE, nullptr) == 0)
+				{
+					throw std::runtime_error(BuildFontResourceErrorMessage("AddFontResourceExW", path));
+				}
+				loadedPaths.emplace_back(std::move(path));
+			}
 		}
-
-		if (response.fonts_size() == 0 && !enumInfo.hasSystemMatch && query != nullptr && *query != L'\0')
+		catch (...)
 		{
-			feedback.set_missingquery(WideToUtf8String(query));
-			feedback.set_processname(WideToUtf8String(GetCurrentProcessBaseName()));
-			hasFeedback = true;
-		}
-
-		if (hasFeedback)
-		{
-			SendFeedbackAsync(std::move(feedback));
+			auto loadFailure = std::current_exception();
+			std::string rollbackFailure;
+			size_t rolledBackCount = 0;
+			for (auto iter = loadedPaths.rbegin(); iter != loadedPaths.rend(); ++iter)
+			{
+				SetLastError(ERROR_SUCCESS);
+				if (RemoveFontResourceExW(iter->c_str(), FR_PRIVATE, nullptr) != FALSE)
+				{
+					++rolledBackCount;
+				}
+				else if (rollbackFailure.empty())
+				{
+					rollbackFailure = BuildFontResourceErrorMessage("RemoveFontResourceExW", *iter);
+				}
+			}
+			loadedPaths.clear();
+			if (rolledBackCount != 0 || !rollbackFailure.empty())
+			{
+				try
+				{
+					std::rethrow_exception(loadFailure);
+				}
+				catch (const std::exception& e)
+				{
+					std::string message = e.what();
+					if (rolledBackCount != 0)
+					{
+						message += "; rolled back ";
+						message += std::to_string(rolledBackCount);
+						message += " font resource(s)";
+					}
+					if (!rollbackFailure.empty())
+					{
+						message += "; ";
+						message += rollbackFailure;
+					}
+					throw std::runtime_error(message);
+				}
+			}
+			std::rethrow_exception(loadFailure);
 		}
 
 		if (!loadedPaths.empty())
@@ -575,6 +621,29 @@ namespace sfh
 			return QueryResolution::SystemFont;
 		}
 		return QueryResolution::NoResult;
+	}
+
+	void SendQueryFeedback(
+		const wchar_t* query,
+		QueryResolution resolution,
+		const std::vector<std::wstring>& loadedPaths)
+	{
+		FontLoadFeedback feedback;
+		for (const auto& path : loadedPaths)
+		{
+			feedback.add_path(WideToUtf8String(path));
+		}
+
+		if (resolution == QueryResolution::NoResult && query != nullptr && *query != L'\0')
+		{
+			feedback.set_missingquery(WideToUtf8String(query));
+			feedback.set_processname(WideToUtf8String(GetCurrentProcessBaseName()));
+		}
+
+		if (feedback.path_size() != 0 || !feedback.missingquery().empty())
+		{
+			SendFeedbackAsync(std::move(feedback));
+		}
 	}
 
 	void QueryAndLoad(const wchar_t* query)
@@ -593,9 +662,14 @@ namespace sfh
 				return;
 			auto response = QueryFont(query);
 
-			QueryCache::GetInstance().AddToCache(query);
 			std::vector<std::wstring> loadedPaths;
 			const auto resolution = TryLoad(query, response, loadedPaths);
+			QueryCache::GetInstance().AddToCache(query);
+			for (const auto& path : loadedPaths)
+			{
+				EventLog::GetInstance().LogDllLoadFont(GetCurrentProcessId(), GetCurrentThreadId(), path.c_str());
+			}
+			SendQueryFeedback(query, resolution, loadedPaths);
 			std::vector<const wchar_t*> logData;
 			for (auto& s : loadedPaths)
 			{

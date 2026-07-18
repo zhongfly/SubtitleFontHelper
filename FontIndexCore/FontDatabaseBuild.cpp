@@ -525,7 +525,10 @@ namespace FontIndexCore
 				std::unique_ptr<FontAnalyzer> analyzer;
 				while (true)
 				{
-					ThrowIfCancelled(isCancelled);
+					if (isCancelled && isCancelled())
+					{
+						return;
+					}
 
 					const size_t currentBatchIndex = nextBatchIndex.fetch_add(1, std::memory_order_relaxed);
 					if (currentBatchIndex >= analyzeBatches.size())
@@ -540,7 +543,10 @@ namespace FontIndexCore
 					const auto& batch = analyzeBatches[currentBatchIndex];
 					for (size_t currentIndex = batch.m_beginIndex; currentIndex < batch.m_endIndex; ++currentIndex)
 					{
-						ThrowIfCancelled(isCancelled);
+						if (isCancelled && isCancelled())
+						{
+							return;
+						}
 
 						try
 						{

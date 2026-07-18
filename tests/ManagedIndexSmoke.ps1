@@ -441,7 +441,7 @@ try {
   <FontFace path="../retry-font/retry-a.ttf" index="0" weight="400" oblique="0" psOutline="1">
     <Win32FamilyName>$retryFace</Win32FamilyName>
   </FontFace>
-  <FontFace path="../retry-font/retry-b.ttf" index="0" weight="400" oblique="0" psOutline="1">
+  <FontFace path="../retry-font/retry-b.ttf" index="0" weight="700" oblique="0" psOutline="1">
     <Win32FamilyName>$retryFace</Win32FamilyName>
   </FontFace>
 </FontDatabase>

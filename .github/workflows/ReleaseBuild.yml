@@ -42,6 +42,19 @@ jobs:
         git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
         & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
 
+    - name: Seed FreeType source archive
+      shell: pwsh
+      run: |
+        $archivePath = Join-Path $env:VCPKG_ROOT "downloads\freetype-freetype-VER-2-13-3.tar.gz"
+        New-Item -ItemType Directory -Force (Split-Path -Parent $archivePath) | Out-Null
+        Invoke-WebRequest -Uri "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3" -OutFile $archivePath
+        $expectedHash = "fccfaa15eb79a105981bf634df34ac9ddf1c53550ec0b334903a1b21f9f8bf5eb2b3f9476e554afa112a0fca58ec85ab212d674dfd853670efec876bacbe8a53"
+        $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA512).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash)
+        {
+          throw "FreeType source archive hash mismatch: expected $expectedHash, got $actualHash"
+        }
+
     - uses: actions/cache@v5
       id: cache
       with:

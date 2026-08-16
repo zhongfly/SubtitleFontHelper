@@ -345,6 +345,17 @@ namespace sfh
 			}
 		}
 
+		void TryLogReloadFailure(const FontResourceError& error)
+		{
+			try
+			{
+				EventLog::GetInstance().LogDebugMessage(L"reload failed: %ls", error.Message().c_str());
+			}
+			catch (...)
+			{
+			}
+		}
+
 		void TryLogReloadFailure()
 		{
 			try
@@ -356,22 +367,10 @@ namespace sfh
 			}
 		}
 
-		void TryShowReloadFailureNotification(const char* message)
+		void TryShowReloadFailureNotification(const std::wstring& details)
 		{
 			try
 			{
-				std::wstring details;
-				if (message != nullptr && *message != '\0')
-				{
-					try
-					{
-						details = Utf8ToWideString(message);
-					}
-					catch (...)
-					{
-					}
-				}
-
 				std::wstring toastMessage = L"配置重载失败";
 				if (!details.empty())
 				{
@@ -382,6 +381,22 @@ namespace sfh
 			catch (...)
 			{
 			}
+		}
+
+		void TryShowReloadFailureNotification(const char* message)
+		{
+			std::wstring details;
+			if (message != nullptr && *message != '\0')
+			{
+				try
+				{
+					details = Utf8ToWideString(message);
+				}
+				catch (...)
+				{
+				}
+			}
+			TryShowReloadFailureNotification(details);
 		}
 
 		void TryShowReloadFailureNotification()
@@ -610,6 +625,14 @@ namespace sfh
 			try
 			{
 				OnInit(cmdline);
+			}
+			catch (const FontResourceError& e)
+			{
+				if (!hadService)
+					throw;
+				TryLogReloadFailure(e);
+				TryShowReloadFailureNotification(e.Message());
+				return;
 			}
 			catch (const std::exception& e)
 			{
@@ -861,6 +884,11 @@ int __stdcall wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCm
 
 		sfh::SingleInstanceLock lock;
 		return sfh::Daemon().DaemonMain(cmdline);
+	}
+	catch (const sfh::FontResourceError& e)
+	{
+		MessageBoxW(nullptr, e.Message().c_str(), L"Error", MB_OK | MB_ICONERROR);
+		return 1;
 	}
 	catch (std::exception& e)
 	{

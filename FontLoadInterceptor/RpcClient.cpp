@@ -494,17 +494,35 @@ namespace sfh
 		IndexFont
 	};
 
-	std::string BuildFontResourceErrorMessage(const char* operation, const std::wstring& path)
+	class FontResourceError final : public std::runtime_error
+	{
+	private:
+		std::wstring m_message;
+
+	public:
+		explicit FontResourceError(std::wstring message)
+			: std::runtime_error(WideToUtf8String(message)),
+			  m_message(std::move(message))
+		{
+		}
+
+		const std::wstring& Message() const noexcept
+		{
+			return m_message;
+		}
+	};
+
+	std::wstring BuildFontResourceErrorMessage(const wchar_t* operation, const std::wstring& path)
 	{
 		const auto error = GetLastError();
-		std::string message = operation;
-		message += " failed: ";
-		message += WideToUtf8String(path);
+		std::wstring message = operation;
+		message += L" failed: ";
+		message += path;
 		if (error != ERROR_SUCCESS)
 		{
-			message += " (Win32 error ";
-			message += std::to_string(error);
-			message += ")";
+			message += L" (Win32 error ";
+			message += std::to_wstring(error);
+			message += L")";
 		}
 		return message;
 	}
@@ -563,7 +581,7 @@ namespace sfh
 				SetLastError(ERROR_SUCCESS);
 				if (AddFontResourceExW(path.c_str(), FR_PRIVATE, nullptr) == 0)
 				{
-					throw std::runtime_error(BuildFontResourceErrorMessage("AddFontResourceExW", path));
+					throw FontResourceError(BuildFontResourceErrorMessage(L"AddFontResourceExW", path));
 				}
 				loadedPaths.emplace_back(std::move(path));
 			}
@@ -571,7 +589,7 @@ namespace sfh
 		catch (...)
 		{
 			auto loadFailure = std::current_exception();
-			std::string rollbackFailure;
+			std::wstring rollbackFailure;
 			size_t rolledBackCount = 0;
 			for (auto iter = loadedPaths.rbegin(); iter != loadedPaths.rend(); ++iter)
 			{
@@ -582,7 +600,7 @@ namespace sfh
 				}
 				else if (rollbackFailure.empty())
 				{
-					rollbackFailure = BuildFontResourceErrorMessage("RemoveFontResourceExW", *iter);
+					rollbackFailure = BuildFontResourceErrorMessage(L"RemoveFontResourceExW", *iter);
 				}
 			}
 			loadedPaths.clear();
@@ -594,19 +612,22 @@ namespace sfh
 				}
 				catch (const std::exception& e)
 				{
-					std::string message = e.what();
+					const auto fontResourceError = dynamic_cast<const FontResourceError*>(&e);
+					std::wstring message = fontResourceError != nullptr
+						? fontResourceError->Message()
+						: AnsiStringToWideString(e.what());
 					if (rolledBackCount != 0)
 					{
-						message += "; rolled back ";
-						message += std::to_string(rolledBackCount);
-						message += " font resource(s)";
+						message += L"; rolled back ";
+						message += std::to_wstring(rolledBackCount);
+						message += L" font resource(s)";
 					}
 					if (!rollbackFailure.empty())
 					{
-						message += "; ";
+						message += L"; ";
 						message += rollbackFailure;
 					}
-					throw std::runtime_error(message);
+					throw FontResourceError(std::move(message));
 				}
 			}
 			std::rethrow_exception(loadFailure);
@@ -700,6 +721,15 @@ namespace sfh
 			default:
 				MarkUnreachable();
 			}
+		}
+		catch (const FontResourceError& e)
+		{
+			EventLog::GetInstance().LogDllQueryFailure(
+				GetCurrentProcessId(),
+				GetCurrentThreadId(),
+				query,
+				e.Message().c_str());
+			// ignore exceptions
 		}
 		catch (std::exception& e)
 		{

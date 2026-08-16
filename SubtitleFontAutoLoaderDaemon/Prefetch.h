@@ -1,11 +1,24 @@
 #pragma once
 
+#include <stdexcept>
+#include <string>
+
 #include "IDaemon.h"
 #include "PersistantData.h"
 #include "RpcServer.h"
 
 namespace sfh
 {
+	class FontResourceError final : public std::runtime_error
+	{
+	private:
+		std::wstring m_message;
+
+	public:
+		explicit FontResourceError(std::wstring message);
+		const std::wstring& Message() const noexcept;
+	};
+
 	class Prefetch
 	{
 	private:

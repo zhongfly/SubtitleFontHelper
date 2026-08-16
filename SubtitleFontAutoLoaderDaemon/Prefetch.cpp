@@ -15,21 +15,32 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+sfh::FontResourceError::FontResourceError(std::wstring message)
+	: std::runtime_error(WideToUtf8String(message)),
+	  m_message(std::move(message))
+{
+}
+
+const std::wstring& sfh::FontResourceError::Message() const noexcept
+{
+	return m_message;
+}
+
 namespace
 {
 	constexpr DWORD PREFETCH_FONT_RESOURCE_FLAGS = FR_PRIVATE | FR_NOT_ENUM;
 
-	std::string BuildFontResourceErrorMessage(const char* operation, const std::wstring& path)
+	std::wstring BuildFontResourceErrorMessage(const wchar_t* operation, const std::wstring& path)
 	{
 		const auto error = GetLastError();
-		std::string message = operation;
-		message += " failed: ";
-		message += sfh::WideToUtf8String(path);
+		std::wstring message = operation;
+		message += L" failed: ";
+		message += path;
 		if (error != ERROR_SUCCESS)
 		{
-			message += " (Win32 error ";
-			message += std::to_string(error);
-			message += ")";
+			message += L" (Win32 error ";
+			message += std::to_wstring(error);
+			message += L")";
 		}
 		return message;
 	}
@@ -40,7 +51,7 @@ namespace
 		const int addedCount = AddFontResourceExW(path.c_str(), PREFETCH_FONT_RESOURCE_FLAGS, nullptr);
 		if (addedCount == 0)
 		{
-			throw std::runtime_error(BuildFontResourceErrorMessage("AddFontResourceExW", path));
+			throw sfh::FontResourceError(BuildFontResourceErrorMessage(L"AddFontResourceExW", path));
 		}
 	}
 
@@ -49,7 +60,7 @@ namespace
 		SetLastError(ERROR_SUCCESS);
 		if (RemoveFontResourceExW(path.c_str(), PREFETCH_FONT_RESOURCE_FLAGS, nullptr) == FALSE)
 		{
-			throw std::runtime_error(BuildFontResourceErrorMessage("RemoveFontResourceExW", path));
+			throw sfh::FontResourceError(BuildFontResourceErrorMessage(L"RemoveFontResourceExW", path));
 		}
 	}
 
@@ -251,7 +262,15 @@ public:
 	{
 		InitializeMissingFontIgnoreRules(std::move(missingFontIgnore));
 		InitializeProcessMissingFontIgnoreRules(std::move(processMissingFontIgnore));
-		LoadLruCache(m_cachePath);
+		try
+		{
+			LoadLruCache(m_cachePath);
+		}
+		catch (...)
+		{
+			UnloadPrefetchedFontResources();
+			throw;
+		}
 	}
 
 	~Implementation()

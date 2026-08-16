@@ -39,16 +39,16 @@ jobs:
     - name: Bootstrap vcpkg
       shell: pwsh
       run: |
-        git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+        git clone --branch 2026.07.29 --depth 1 https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
         & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
 
     - name: Seed FreeType source archive
       shell: pwsh
       run: |
-        $archivePath = Join-Path $env:VCPKG_ROOT "downloads\freetype-freetype-VER-2-13-3.tar.gz"
+        $archivePath = Join-Path $env:VCPKG_ROOT "downloads\freetype-freetype-VER-2-14-3.tar.gz"
         New-Item -ItemType Directory -Force (Split-Path -Parent $archivePath) | Out-Null
-        Invoke-WebRequest -Uri "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3" -OutFile $archivePath
-        $expectedHash = "fccfaa15eb79a105981bf634df34ac9ddf1c53550ec0b334903a1b21f9f8bf5eb2b3f9476e554afa112a0fca58ec85ab212d674dfd853670efec876bacbe8a53"
+        Invoke-WebRequest -Uri "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-14-3" -OutFile $archivePath
+        $expectedHash = "c3b6b0cc4b428c9c647ab2148386901dfd315273b68051940e8fea6010d46fdd2913467c3ef58be0d499b8e2ef5a0f1a4cc5e739756155587f4f7dff08ef9695"
         $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA512).Hash.ToLowerInvariant()
         if ($actualHash -ne $expectedHash)
         {
